@@ -2,6 +2,7 @@ import React from "react";
 import "./App.css";
 import {
   CssBaseline,
+  GlobalStyles,
   Box,
   Drawer,
   IconButton,
@@ -30,6 +31,7 @@ import FormstrLogo from "./assets/formstr-pages-logo.png";
 import DocPage from "./components/DocPage";
 import { SharedPagesProvider } from "./contexts/SharedDocsContext";
 import { RelayProvider } from "./contexts/RelayContext";
+import { DocMetadataProvider } from "./contexts/DocMetadataContext";
 
 const drawerWidth = 320;
 
@@ -79,7 +81,9 @@ export default function App() {
       <RelayProvider>
         <DocumentProvider>
           <SharedPagesProvider>
-            <RouterProvider router={router} />
+            <DocMetadataProvider>
+              <RouterProvider router={router} />
+            </DocMetadataProvider>
           </SharedPagesProvider>
         </DocumentProvider>
       </RelayProvider>
@@ -108,6 +112,9 @@ function AppLayout() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
+      <GlobalStyles styles={(t) => ({
+        ".tiptap a": { color: t.palette.secondary.main },
+      })} />
 
       {/* ===== TOP BAR ===== */}
       <AppBar

@@ -9,57 +9,71 @@ export async function fetchAllDocuments(
   relays: string[],
   addDocument: (doc: Event) => void,
   pubkey: string,
-): Promise<NostrEvent[]> {
+): Promise<{ relayMap: Map<string, string[]> }> {
   return new Promise((resolve) => {
     const documents: NostrEvent[] = [];
+    // eventId → Set of relay URLs that returned it
+    const eventRelays = new Map<string, Set<string>>();
+    const seenIds = new Set<string>();
+    let eoseCount = 0;
     let settled = false;
 
     const finish = () => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
-      sub.close();
+      subs.forEach((s) => s.close());
 
-      // Group by d-tag and select latest version
+      // Group by d-tag, keep latest per d-tag
       const grouped: Record<string, NostrEvent> = {};
-
       for (const event of documents) {
         let dTag: string | undefined;
-
-        // Extract d-tag from event tags
         for (const tag of event.tags) {
-          if (tag.length >= 2 && tag[0] === "d") {
-            dTag = tag[1];
-            break;
-          }
+          if (tag.length >= 2 && tag[0] === "d") { dTag = tag[1]; break; }
         }
-
-        if (dTag) {
-          // Keep the latest event for this d-tag
-          if (
-            !grouped[dTag] ||
-            event.created_at > grouped[dTag].created_at
-          ) {
-            grouped[dTag] = event;
-          }
+        if (dTag && (!grouped[dTag] || event.created_at > grouped[dTag].created_at)) {
+          grouped[dTag] = event;
         }
       }
 
-      resolve(Object.values(grouped));
+      // Build address → relay[] map
+      const relayMap = new Map<string, string[]>();
+      for (const event of Object.values(grouped)) {
+        const dTag = event.tags.find((t) => t[0] === "d")?.[1];
+        if (!dTag) continue;
+        const address = `${event.kind}:${event.pubkey}:${dTag}`;
+        const relaysForEvent = eventRelays.get(event.id);
+        relayMap.set(address, relaysForEvent ? Array.from(relaysForEvent) : []);
+      }
+
+      resolve({ relayMap });
     };
 
     const timeout = setTimeout(finish, 8000);
 
-    const sub = pool.subscribeMany(
-      relays,
-      { kinds: [KIND_FILE], authors: [pubkey] },
-      {
-        onevent: (event: NostrEvent) => {
-          documents.push(event);
-          addDocument(event);
+    // Subscribe to each relay individually so we can track origins
+    const subs = relays.map((relay) =>
+      pool.subscribeMany(
+        [relay],
+        { kinds: [KIND_FILE], authors: [pubkey] },
+        {
+          onevent: (event: NostrEvent) => {
+            // Track which relay(s) returned this event
+            if (!eventRelays.has(event.id)) eventRelays.set(event.id, new Set());
+            eventRelays.get(event.id)!.add(relay);
+
+            if (!seenIds.has(event.id)) {
+              seenIds.add(event.id);
+              documents.push(event);
+              addDocument(event);
+            }
+          },
+          oneose: () => {
+            eoseCount++;
+            if (eoseCount >= relays.length) finish();
+          },
         },
-        oneose: finish,
-      },
+      ),
     );
   });
 }

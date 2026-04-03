@@ -5,10 +5,12 @@ import { KIND_FILE } from "./kinds";
 export const fetchDeleteRequests = (
   relays: string[],
   onEvent: (event: Event) => void,
+  pubkey: string,
 ) => {
   const deleteSubscriptionFilter = {
     kinds: [5], // NIP-09 deletion requests
     "#k": [`${KIND_FILE}`],
+    authors: [pubkey],
   };
   return new Promise((resolve) => {
     let settled = false;

@@ -82,7 +82,6 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({
   const [deletedEventIds, setDeletedEventIds] = useState<Set<string>>(
     new Set(),
   );
-
   const addDeletionRequest = (delEvent: Event) => {
     const eTags = delEvent.tags.filter((t) => t[0] === "e").map((t) => t[1]);
 

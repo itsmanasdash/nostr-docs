@@ -6,7 +6,11 @@ import {
   Alert,
   useMediaQuery,
   Typography,
+  Chip,
+  InputBase,
 } from "@mui/material";
+import LabelOutlinedIcon from "@mui/icons-material/LabelOutlined";
+import { useDocMetadata } from "../../contexts/DocMetadataContext";
 import { useNavigate, useBlocker } from "react-router-dom";
 import { finalizeEvent, getPublicKey, nip19, type Event } from "nostr-tools";
 import { hexToBytes } from "nostr-tools/utils";
@@ -44,6 +48,71 @@ import { encodeNKeys } from "../../utils/nkeys";
 const AUTO_SAVE_DELAY_MS = 30_000;
 
 type EditorMode = "edit" | "preview" | "split";
+
+function TagRow({ address }: { address: string }) {
+  const { docTags, setDocTags } = useDocMetadata();
+  const tags = docTags.get(address) ?? [];
+  const [input, setInput] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleAdd = async () => {
+    const tag = input.trim().toLowerCase();
+    if (!tag || tags.includes(tag)) { setInput(""); return; }
+    setSaving(true);
+    try { await setDocTags(address, [...tags, tag]); }
+    finally { setSaving(false); setInput(""); }
+  };
+
+  const handleRemove = async (tag: string) => {
+    setSaving(true);
+    try { await setDocTags(address, tags.filter((t) => t !== tag)); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <Box
+      sx={{
+        display: "flex",
+        alignItems: "center",
+        flexWrap: "wrap",
+        gap: 0.75,
+        px: 1.5,
+        py: 0.75,
+        borderBottom: "1px solid",
+        borderColor: "divider",
+      }}
+    >
+      <LabelOutlinedIcon sx={{ fontSize: 15, opacity: 0.4, flexShrink: 0 }} />
+      {tags.map((tag) => (
+        <Chip
+          key={tag}
+          label={tag}
+          size="small"
+          onDelete={saving ? undefined : () => handleRemove(tag)}
+          sx={{ height: 20, fontSize: "0.7rem", "& .MuiChip-label": { px: 1 } }}
+        />
+      ))}
+      <InputBase
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") handleAdd();
+          if (e.key === "Escape") setInput("");
+        }}
+        disabled={saving}
+        placeholder="add tag…"
+        sx={{
+          fontSize: "0.72rem",
+          color: "text.secondary",
+          "& input": { p: 0 },
+          "& input::placeholder": { opacity: 0.5 },
+          minWidth: 70,
+          flex: 1,
+        }}
+      />
+    </Box>
+  );
+}
 
 export function DocumentEditorController({
   viewKey,
@@ -423,6 +492,7 @@ export function DocumentEditorController({
         address,
         relays,
         reason: "User requested deletion",
+        eventIds: history?.versions.map((v) => v.event.id) ?? [],
       });
       removeDocument(address);
       removeLocalEvent(address).catch(() => {});
@@ -481,10 +551,14 @@ export function DocumentEditorController({
           flex: 1,
           borderRadius: 3,
           overflow: "hidden",
+          bgcolor: "background.paper",
           display: "flex",
           flexDirection: "column",
         }}
       >
+        {!isViewOnly && selectedDocumentId && (
+          <TagRow address={selectedDocumentId} />
+        )}
         <DocEditorSurface
           value={md}
           editor={editor}
@@ -550,6 +624,7 @@ export function DocumentEditorController({
             address,
             relays,
             reason: "User requested deletion",
+            eventIds: history?.versions.map((v) => v.event.id) ?? [],
           });
           removeDocument(address);
           removeLocalEvent(address).catch(() => {});

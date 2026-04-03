@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview",
+    "preview": "vite preview --base /",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "android:sync": "npm run build && npx cap sync android",

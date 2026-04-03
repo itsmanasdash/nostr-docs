@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTheme } from "@mui/material/styles";
 import { alpha } from "@mui/material/styles";
 import { fetchAllDocuments } from "../nostr/fetchFile.ts";
 import {
@@ -19,6 +20,7 @@ import {
   Tabs,
   Chip,
   Divider,
+  Tooltip,
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import { useDocumentContext } from "../contexts/DocumentContext.tsx";
@@ -31,6 +33,59 @@ import { useNavigate } from "react-router-dom";
 import { useSharedPages } from "../contexts/SharedDocsContext.tsx";
 import { encodeNKeys } from "../utils/nkeys.ts";
 import { getEventAddress } from "../utils/helpers.ts";
+import { useDocMetadata } from "../contexts/DocMetadataContext.tsx";
+
+/** Deterministic hue (0–359) from a tag string. */
+function tagHue(tag: string): number {
+  let hash = 0;
+  for (let i = 0; i < tag.length; i++) {
+    hash = tag.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return Math.abs(hash) % 360;
+}
+
+function useTagColor(tag: string) {
+  const theme = useTheme();
+  const hue = tagHue(tag);
+  const dark = theme.palette.mode === "dark";
+  return {
+    bg: `hsla(${hue}, 60%, ${dark ? 55 : 45}%, 0.18)`,
+    text: `hsl(${hue}, ${dark ? 75 : 55}%, ${dark ? 78 : 32}%)`,
+  };
+}
+
+function TagChip({
+  tag,
+  selected,
+  onClick,
+  size = "filter",
+}: {
+  tag: string;
+  selected?: boolean;
+  onClick?: (e: React.MouseEvent) => void;
+  size?: "filter" | "inline";
+}) {
+  const { bg, text } = useTagColor(tag);
+  return (
+    <Chip
+      label={tag}
+      size="small"
+      onClick={onClick}
+      sx={{
+        height: size === "filter" ? 22 : 16,
+        fontSize: size === "filter" ? "0.72rem" : "0.6rem",
+        bgcolor: selected ? `${text}33` : bg,
+        color: text,
+        border: selected ? `1px solid ${text}` : "none",
+        fontWeight: selected ? 700 : 400,
+        cursor: onClick ? "pointer" : "default",
+        "& .MuiChip-label": { px: size === "filter" ? 1 : 0.75 },
+        "&:hover": onClick ? { bgcolor: `${text}33` } : {},
+      }}
+    />
+  );
+}
+
 
 export default function DocumentList({
   onEdit,
@@ -44,8 +99,10 @@ export default function DocumentList({
     addDeletionRequest,
     selectedDocumentId,
   } = useDocumentContext();
+  const [docRelays, setDocRelays] = useState<Map<string, string[]>>(new Map());
 
   const { sharedDocuments, getKeys } = useSharedPages();
+  const { docTags, allTags, selectedTag, setSelectedTag } = useDocMetadata();
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"personal" | "shared">("personal");
   const { user } = useUser();
@@ -92,10 +149,6 @@ export default function DocumentList({
       setLoading(true);
 
       // ── Phase 1: local-first hydration ──────────────────
-      // Load whatever is in IndexedDB before touching relays. This makes the
-      // sidebar populate instantly and works fully offline. Each addDocument
-      // call is awaited sequentially to avoid race conditions in the context
-      // state updater.
       let localEntries: Awaited<ReturnType<typeof loadAllLocalEvents>> = [];
       try {
         localEntries = await loadAllLocalEvents();
@@ -116,12 +169,10 @@ export default function DocumentList({
       // ── Phase 2: relay sync ──────────────────────────────
       try {
         const pubkey = await signer.getPublicKey();
-        await fetchAllDocuments(
+        const { relayMap } = await fetchAllDocuments(
           relays,
           async (doc: Event) => {
             await addDocument(doc);
-            // Cache relay-fetched events locally so both devices end up with
-            // each other's documents in IndexedDB after a sync.
             const address = getEventAddress(doc);
             if (address) {
               storeLocalEvent({
@@ -134,10 +185,10 @@ export default function DocumentList({
           },
           pubkey,
         );
-        await fetchDeleteRequests(relays, addDeletionRequest);
+        setDocRelays(relayMap);
+        await fetchDeleteRequests(relays, addDeletionRequest, pubkey);
 
         // ── Phase 3: re-broadcast any events saved while offline ──
-        // Fire-and-forget: don't block loading state on this.
         for (const entry of localEntries) {
           if (entry.pendingBroadcast) {
             publishEvent(entry.event, relays)
@@ -159,7 +210,16 @@ export default function DocumentList({
     navigate("/");
   };
 
-  const docsToShow = tab === "personal" ? visibleDocuments : sharedDocuments;
+  const allDocs = tab === "personal" ? visibleDocuments : sharedDocuments;
+
+  const docsToShow = selectedTag
+    ? new Map(
+        [...allDocs.entries()].filter(([address]) =>
+          (docTags.get(address) ?? []).includes(selectedTag),
+        ),
+      )
+    : allDocs;
+
   const personalCount = visibleDocuments.size;
   const sharedCount = sharedDocuments.size;
 
@@ -230,10 +290,41 @@ export default function DocumentList({
         />
       </Tabs>
 
+      {/* Tag filter chips */}
+      {allTags.length > 0 && (
+        <Box
+          sx={{
+            px: 1.5,
+            py: 0.75,
+            display: "flex",
+            gap: 0.5,
+            flexWrap: "wrap",
+            flexShrink: 0,
+            borderBottom: "1px solid",
+            borderColor: "divider",
+          }}
+        >
+          <Chip
+            label="All"
+            size="small"
+            onClick={() => setSelectedTag(null)}
+            color={selectedTag === null ? "secondary" : "default"}
+            sx={{ height: 22, fontSize: "0.72rem" }}
+          />
+          {allTags.map((tag) => (
+            <TagChip
+              key={tag}
+              tag={tag}
+              selected={selectedTag === tag}
+              onClick={() => setSelectedTag(selectedTag === tag ? null : tag)}
+            />
+          ))}
+        </Box>
+      )}
+
       {/* List area */}
       <Box sx={{ flex: 1, overflowY: "auto", px: 1.5, py: 1 }}>
         {loading ? (
-          /* Skeleton placeholders */
           <Box sx={{ display: "flex", flexDirection: "column", gap: 1, pt: 1 }}>
             {[1, 2, 3, 4].map((i) => (
               <Box key={i} sx={{ px: 1 }}>
@@ -282,13 +373,14 @@ export default function DocumentList({
 
               const { event, decryptedContent } = latest;
               const isSelected = selectedDocumentId === address;
+              const tags = docTags.get(address) ?? [];
+              const relays = docRelays.get(address) ?? [];
 
-              // Extract a title-like preview from the first line
               const firstLine =
                 (decryptedContent ?? "").split("\n").find((l) => l.trim()) ??
                 "Untitled";
               const title = firstLine
-                .replace(/^#+\s*/, "") // strip heading markers
+                .replace(/^#+\s*/, "")
                 .slice(0, 42)
                 .trim();
               const displayTitle = title || "Untitled";
@@ -305,6 +397,7 @@ export default function DocumentList({
                     sx={{
                       borderRadius: 2,
                       py: 1,
+                      pr: 0.5,
                       bgcolor: isSelected
                         ? (t) => alpha(t.palette.secondary.main, 0.12)
                         : "transparent",
@@ -324,22 +417,70 @@ export default function DocumentList({
                   >
                     <ListItemText
                       primary={displayTitle}
-                      secondary={new Date(
-                        event.created_at * 1000,
-                      ).toLocaleDateString(undefined, {
-                        month: "short",
-                        day: "numeric",
-                        year: "numeric",
-                      })}
+                      secondary={
+                        <Box component="span" sx={{ display: "block" }}>
+                          <Box component="span" sx={{ opacity: 0.6, fontSize: "0.7rem" }}>
+                            {new Date(event.created_at * 1000).toLocaleDateString(
+                              undefined,
+                              { month: "short", day: "numeric", year: "numeric" },
+                            )}
+                          </Box>
+                          {tags.length > 0 && (
+                            <Box
+                              component="span"
+                              sx={{ display: "flex", flexWrap: "wrap", gap: 0.4, mt: 0.4 }}
+                            >
+                              {tags.map((tag) => (
+                                <TagChip
+                                  key={tag}
+                                  tag={tag}
+                                  size="inline"
+                                  selected={selectedTag === tag}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedTag(selectedTag === tag ? null : tag);
+                                  }}
+                                />
+                              ))}
+                            </Box>
+                          )}
+                          {relays.length > 0 && (
+                            <Box
+                              component="span"
+                              sx={{ display: "flex", flexWrap: "wrap", gap: 0.4, mt: 0.4 }}
+                            >
+                              {relays.map((r) => {
+                                const host = new URL(r).hostname;
+                                return (
+                                  <Tooltip key={r} title={r}>
+                                    <Box
+                                      component="span"
+                                      sx={{
+                                        fontSize: "0.58rem",
+                                        fontFamily: "monospace",
+                                        opacity: 0.5,
+                                        bgcolor: (t) => alpha(t.palette.text.primary, 0.07),
+                                        borderRadius: 0.75,
+                                        px: 0.6,
+                                        py: 0.1,
+                                        lineHeight: 1.6,
+                                      }}
+                                    >
+                                      {host}
+                                    </Box>
+                                  </Tooltip>
+                                );
+                              })}
+                            </Box>
+                          )}
+                        </Box>
+                      }
                       primaryTypographyProps={{
                         variant: "body2",
                         fontWeight: isSelected ? 700 : 400,
                         noWrap: true,
                       }}
-                      secondaryTypographyProps={{
-                        variant: "caption",
-                        sx: { opacity: 0.6 },
-                      }}
+                      secondaryTypographyProps={{ component: "span" }}
                     />
                   </ListItemButton>
                 </Box>
@@ -348,6 +489,7 @@ export default function DocumentList({
           </List>
         )}
       </Box>
+
     </Box>
   );
 }

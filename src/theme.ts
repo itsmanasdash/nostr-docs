@@ -155,7 +155,7 @@ export const themes: Record<ThemeId, ThemeDefinition> = {
         primary: { main: "#BD93F9" },
         secondary: { main: "#FF79C6" },
         background: { default: "#1E1F29", paper: "#282A36" },
-        text: { primary: "#F8F8F2", secondary: "#6272A4" },
+        text: { primary: "#F8F8F2", secondary: "#A0A8C3" },
       },
       typography: { fontFamily: `"Inter", sans-serif` },
       shape: { borderRadius: 12 },

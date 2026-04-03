@@ -28,10 +28,12 @@ export async function deleteEvent({
   address,
   relays,
   reason = "User requested deletion",
+  eventIds = [],
 }: {
   address: string;
   relays: string[];
   reason?: string;
+  eventIds?: string[];
 }) {
   const parsed = parseAddress(address);
   if (!parsed) {
@@ -51,6 +53,7 @@ export async function deleteEvent({
     tags: [
       ["a", address],
       ["k", String(parsed.kind)],
+      ...eventIds.map((id) => ["e", id]),
     ],
   };
 

@@ -56,6 +56,14 @@ export function DocEditorSurface({
 }: Props) {
   const theme = useTheme();
 
+  const linkSx = {
+    "& a": {
+      color: theme.palette.secondary.main,
+      textDecoration: "underline",
+      "&:hover": { opacity: 0.8 },
+    },
+  };
+
   /* ── Preview mode ─────────────────────────────────────── */
   if (mode === "preview") {
     return (
@@ -65,11 +73,8 @@ export function DocEditorSurface({
           overflowY: "auto",
           p: 3,
           ...markdownSxBase,
-          color: theme.palette.text.secondary,
-          "& h1, & h2, & h3, & h4": {
-            ...markdownSxBase["& h1, & h2, & h3, & h4"],
-            color: theme.palette.text.primary,
-          },
+          ...linkSx,
+          color: theme.palette.text.primary,
         }}
       >
         {/* Sticky edit button — hidden for view-only shared links */}
@@ -140,11 +145,8 @@ export function DocEditorSurface({
             overflowY: "auto",
             p: 3,
             ...markdownSxBase,
-            color: theme.palette.text.secondary,
-            "& h1, & h2, & h3, & h4": {
-              ...markdownSxBase["& h1, & h2, & h3, & h4"],
-              color: theme.palette.text.primary,
-            },
+            ...linkSx,
+            color: theme.palette.text.primary,
           }}
         >
           {value.trim() ? (
