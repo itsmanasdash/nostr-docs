@@ -1,3 +1,8 @@
+# 0.8.0
+- Fixed issues with delete
+- Fixed sharing transperancy
+- Added a local trash before final delete
+
 # 0.7.0
 - Added upload images/videos & files to blossom servers! 
 - Show images and videos in-line, Files can be downloaded.
