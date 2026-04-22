@@ -100,9 +100,12 @@ export default function App() {
 // darkMode state needs to be co-located with the toggle handler.
 function AppLayout() {
   const [mobileOpen, setMobileOpen] = React.useState(false);
-  const [themeId, setThemeId] = React.useState<ThemeId>(
-    () => (localStorage.getItem("formstr:theme") as ThemeId | null) ?? "candlelit"
-  );
+  const [themeId, setThemeId] = React.useState<ThemeId>(() => {
+    const stored = localStorage.getItem("formstr:theme") as ThemeId | null;
+    if (stored) return stored;
+    const ids = Object.keys(themes) as ThemeId[];
+    return ids[Math.floor(Math.random() * ids.length)];
+  });
   const isDesktop = useMediaQuery("(min-width:900px)");
 
   const theme = themes[themeId].theme;
