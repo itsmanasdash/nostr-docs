@@ -18,6 +18,7 @@ import {
 } from "nostr-tools";
 import { hexToBytes } from "nostr-tools/utils";
 import { publishEvent } from "../nostr/publish";
+import { storeLocalEvent } from "../lib/localStore";
 import { pool } from "../nostr/relayPool";
 import { KIND_FILE } from "../nostr/kinds";
 import type { SubCloser } from "nostr-tools/abstract-pool";
@@ -125,6 +126,18 @@ export const SharedPagesProvider: React.FC<{ children: React.ReactNode }> = ({
         // the personal list so it doesn't silently disappear from "My Pages".
         if (event.pubkey === currentUserPubkey) {
           addDocument(event, { viewKey: keys[1] });
+          // Persist the viewKey so subsequent app loads can decrypt via Phase 1
+          // without ever needing to fall back to the signer for this content.
+          const dTag = event.tags.find((t) => t[0] === "d")?.[1];
+          if (dTag) {
+            storeLocalEvent({
+              address: `${event.kind}:${event.pubkey}:${dTag}`,
+              event,
+              viewKey: keys[1],
+              pendingBroadcast: false,
+              savedAt: Date.now(),
+            }).catch(() => {});
+          }
           return;
         }
 

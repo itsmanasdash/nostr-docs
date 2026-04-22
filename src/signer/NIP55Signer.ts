@@ -92,7 +92,11 @@ export function createNIP55Signer(
       const { result } = await p.nip44Decrypt(
         packageName, ciphertext, "", pubkey, currentPubkey
       );
-      if (!result) throw new Error("NIP-44 decryption failed");
+      // Amber returns this literal string when it cannot decrypt the ciphertext
+      // (e.g. content encrypted with a viewKey rather than the user's NIP-44 key).
+      // Treat it as a failure so callers receive null instead of storing the
+      // error string as document content.
+      if (!result || result === "Could not decrypt message") throw new Error("NIP-44 decryption failed");
       return result;
     },
   };

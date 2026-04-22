@@ -206,8 +206,17 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({
         address,
         versions: [],
       };
-      if (history.versions.some((v) => v.event.id === document.id)) {
-        return prev;
+
+      const alreadyPresent = history.versions.some(
+        (v) => v.event.id === document.id,
+      );
+      if (alreadyPresent) {
+        // If we now have a viewKey we didn't have before, re-decrypt to correct
+        // content that may have been stored via a failed signer attempt.
+        if (!keys?.viewKey) return prev;
+        history.versions = history.versions.filter(
+          (v) => v.event.id !== document.id,
+        );
       }
 
       history.versions = [

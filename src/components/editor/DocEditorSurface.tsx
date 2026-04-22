@@ -139,7 +139,7 @@ export function DocEditorSurface({
           )}
         </Box>
         {commentsEnabled && (
-          <CommentComposer editor={null} containerRef={previewRef} docEventId={docEventId} />
+          <CommentComposer editor={null} containerRef={previewRef} docEventId={docEventId} isMobile={isMobile} />
         )}
         {showComments && <CommentSidebar onClose={onCloseComments} />}
       </Box>
@@ -214,7 +214,7 @@ export function DocEditorSurface({
       >
         <EditorContent editor={editor} />
         {commentsEnabled && (
-          <CommentComposer editor={editor} docEventId={docEventId} />
+          <CommentComposer editor={editor} docEventId={docEventId} isMobile={isMobile} />
         )}
       </Box>
       {showComments && <CommentSidebar onClose={onCloseComments} />}

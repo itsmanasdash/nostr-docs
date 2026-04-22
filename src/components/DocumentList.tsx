@@ -185,12 +185,20 @@ export default function DocumentList({
         const { relayMap } = await fetchAllDocuments(
           relays,
           async (doc: Event) => {
-            await addDocument(doc);
             const address = getEventAddress(doc);
+            const localEntry = address
+              ? localEntries.find((e) => e.address === address)
+              : undefined;
+            await addDocument(doc, {
+              viewKey: localEntry?.viewKey,
+              editKey: localEntry?.editKey,
+            });
             if (address) {
               storeLocalEvent({
                 address,
                 event: doc,
+                viewKey: localEntry?.viewKey,
+                editKey: localEntry?.editKey,
                 pendingBroadcast: false,
                 savedAt: Date.now(),
               }).catch(() => {});
@@ -421,7 +429,13 @@ export default function DocumentList({
           </Box>
         ) : (
           <List disablePadding>
-            {Array.from(docsToShow.entries()).map(([address, history], idx) => {
+            {Array.from(docsToShow.entries())
+              .sort(([, a], [, b]) => {
+                const aTime = a.versions.at(-1)?.event.created_at ?? 0;
+                const bTime = b.versions.at(-1)?.event.created_at ?? 0;
+                return bTime - aTime;
+              })
+              .map(([address, history], idx) => {
               const latest = history.versions.at(-1);
               if (!latest) return null;
 

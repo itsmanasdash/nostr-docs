@@ -46,10 +46,12 @@ export async function storeLocalEvent(entry: LocalStoredEvent): Promise<void> {
         resolve();
         return;
       }
-      // Preserve an explicit localOnly flag set on this device so a newer
-      // relay event can't silently re-enable syncing.
+      // Preserve keys and flags that were set on this device so a newer relay
+      // event (which carries no key metadata) can't silently lose them.
       const toStore: LocalStoredEvent = {
         ...entry,
+        viewKey: entry.viewKey ?? existing?.viewKey,
+        editKey: entry.editKey ?? existing?.editKey,
         localOnly: entry.localOnly ?? existing?.localOnly,
       };
       const putReq = store.put(toStore);

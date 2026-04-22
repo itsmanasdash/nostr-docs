@@ -15,6 +15,7 @@ type Props = {
   editor: Editor | null;
   containerRef?: React.RefObject<HTMLElement | null>;
   docEventId: string;
+  isMobile?: boolean;
 };
 
 function extractContext(range: Range, count: number) {
@@ -87,7 +88,7 @@ function extractContext(range: Range, count: number) {
   return { prefix, suffix };
 }
 
-export function CommentComposer({ editor, containerRef, docEventId }: Props) {
+export function CommentComposer({ editor, containerRef, docEventId, isMobile }: Props) {
   const { addComment } = useComments();
 
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
@@ -234,19 +235,45 @@ export function CommentComposer({ editor, containerRef, docEventId }: Props) {
 
   if (!anchorRect) return null;
 
-  const top = anchorRect.top - 8;
-  const left = anchorRect.left + anchorRect.width / 2;
+  // On mobile, pin to the right edge at the selection's vertical midpoint so
+  // the button is never obscured by the native copy/paste/select menu.
+  const buttonTop = isMobile
+    ? anchorRect.top + anchorRect.height / 2 - 18
+    : anchorRect.top - 8;
+  const buttonSx = isMobile
+    ? { position: "fixed" as const, top: buttonTop, right: 12, zIndex: 1500 }
+    : {
+        position: "fixed" as const,
+        top: buttonTop,
+        left: anchorRect.left + anchorRect.width / 2,
+        transform: "translateX(-50%) translateY(-100%)",
+        zIndex: 1500,
+      };
+
+  // Compose form: on mobile centre horizontally and anchor just below the button.
+  const formTop = isMobile ? buttonTop + 44 : buttonTop;
+  const formSx = isMobile
+    ? {
+        position: "fixed" as const,
+        top: formTop,
+        left: "50%",
+        transform: "translateX(-50%)",
+        zIndex: 1500,
+        width: "min(320px, calc(100vw - 32px))",
+      }
+    : {
+        position: "fixed" as const,
+        top: formTop,
+        left: anchorRect.left + anchorRect.width / 2,
+        transform: "translateX(-50%) translateY(-100%)",
+        zIndex: 1500,
+        width: 280,
+      };
 
   if (!composing) {
     return (
       <Box
-        sx={{
-          position: "fixed",
-          top,
-          left,
-          transform: "translateX(-50%) translateY(-100%)",
-          zIndex: 1500,
-        }}
+        sx={buttonSx}
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
       >
@@ -273,13 +300,8 @@ export function CommentComposer({ editor, containerRef, docEventId }: Props) {
     <Paper
       elevation={4}
       sx={{
-        position: "fixed",
-        top,
-        left,
-        transform: "translateX(-50%) translateY(-100%)",
-        zIndex: 1500,
+        ...formSx,
         p: 1.5,
-        width: 280,
         display: "flex",
         flexDirection: "column",
         gap: 1,
