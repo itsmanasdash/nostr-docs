@@ -8,9 +8,6 @@ import {
   Toolbar,
   Typography,
   useMediaQuery,
-  Paper,
-  Stack,
-  Button,
 } from "@mui/material";
 import MenuIcon from "@mui/icons-material/Menu";
 import {
