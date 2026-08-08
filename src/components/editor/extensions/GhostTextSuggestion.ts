@@ -74,15 +74,32 @@ export const GhostTextSuggestion = Extension.create<GhostTextSuggestionOptions>(
                   widget.className = "ai-ghost-suggestion";
                   widget.textContent = suggestionText;
                   widget.setAttribute("contenteditable", "false");
-                  widget.setAttribute("aria-hidden", "true");
+                  widget.setAttribute("role", "button");
+                  widget.setAttribute("aria-label", "Accept suggested text");
                   widget.setAttribute("title", "Tap to accept");
+
+                  const accept = () => {
+                    const accepted = acceptGhostSuggestion(
+                      view,
+                      suggestionText,
+                      ghost.pos,
+                    );
+                    if (accepted) options.onAccept?.(suggestionText);
+                  };
+
                   widget.addEventListener("pointerdown", (e) => {
                     if (!e.isPrimary) return;
                     if (e.pointerType === "mouse" && e.button !== 0) return;
                     e.preventDefault();
                     e.stopPropagation();
-                    acceptGhostSuggestion(view, suggestionText);
-                    options.onAccept?.(suggestionText);
+                    accept();
+                  });
+                  // Some mobile WebViews and assistive technologies emit a
+                  // click without a preceding pointer event.
+                  widget.addEventListener("click", (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    accept();
                   });
                   return widget;
                 },
@@ -100,8 +117,9 @@ export const GhostTextSuggestion = Extension.create<GhostTextSuggestionOptions>(
 
             if (event.key === "Tab") {
               event.preventDefault();
-              acceptGhostSuggestion(view, ghost.text);
-              options.onAccept?.(ghost.text);
+              if (acceptGhostSuggestion(view, ghost.text, ghost.pos)) {
+                options.onAccept?.(ghost.text);
+              }
               return true;
             }
 
@@ -149,11 +167,26 @@ export function clearGhostSuggestion(view: EditorView): void {
   view.dispatch(tr);
 }
 
-function acceptGhostSuggestion(view: EditorView, text: string): void {
-  const { from } = view.state.selection;
+function acceptGhostSuggestion(
+  view: EditorView,
+  text: string,
+  pos: number,
+): boolean {
+  const current = ghostSuggestionPluginKey.getState(view.state);
+  const { selection } = view.state;
+  if (
+    current?.text !== text ||
+    current.pos !== pos ||
+    !selection.empty ||
+    selection.from !== pos
+  ) {
+    return false;
+  }
+
   const tr = view.state.tr
-    .insertText(text, from)
+    .insertText(text, pos)
     .setMeta(ghostSuggestionPluginKey, { text: null, pos: -1 });
   view.dispatch(tr);
   view.focus();
+  return true;
 }

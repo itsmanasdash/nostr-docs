@@ -37,6 +37,8 @@
   pointer-events: auto;
   user-select: none;
   -webkit-user-select: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
   white-space: pre-wrap;
 }
 

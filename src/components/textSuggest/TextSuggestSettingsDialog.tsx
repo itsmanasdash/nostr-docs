@@ -25,6 +25,7 @@ import RadioButtonUncheckedIcon from "@mui/icons-material/RadioButtonUnchecked";
 import { loadPrefs, savePrefs } from "../../lib/textSuggest/prefs";
 import { makeModelId } from "../../lib/textSuggest/modelCatalog";
 import { textSuggestService } from "../../lib/textSuggest/wllamaService";
+import { RuntimeCapabilities } from "./RuntimeCapabilities";
 import type {
   TextSuggestModelEntry,
   TextSuggestModelId,
@@ -153,6 +154,8 @@ export default function TextSuggestSettingsDialog({ open, onClose, onSaved }: Pr
           <strong>Tab</strong> or tap the ghost text to accept,{" "}
           <strong>Esc</strong> to dismiss.
         </Typography>
+
+        <RuntimeCapabilities />
 
         <FormControlLabel
           sx={{ mb: 2 }}

@@ -605,10 +605,10 @@ export function DocumentEditorController({
   }, [editor, textSuggest.suggestion]);
 
   /* ── Accept/dismiss feedback for the ghost-text extension ───────── */
-  // Tab/Escape inside GhostTextSuggestion clear the ProseMirror decoration
-  // directly (so the UI reacts instantly without waiting on this hook's
-  // state). This effect mirrors that back into useTextSuggest's state so a
-  // stale `textSuggest.suggestion` doesn't get re-applied by the effect
+  // Tap/Tab/Escape inside GhostTextSuggestion clear the ProseMirror
+  // decoration directly (so the UI reacts instantly without waiting on this
+  // hook's state). This effect mirrors that back into useTextSuggest's state
+  // so a stale `textSuggest.suggestion` doesn't get re-applied by the effect
   // above on the next render.
   useEffect(() => {
     if (!editor) return;

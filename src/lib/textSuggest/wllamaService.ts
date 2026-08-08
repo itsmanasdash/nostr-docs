@@ -1,21 +1,60 @@
-// src/lib/textSuggest/wllamaService.ts
-import { WllamaService } from "wllama-service";
+import { CacheManager, Wllama } from "@wllama/wllama/esm/index.js";
 import type {
   SuggestRequest,
   SuggestResult,
   TextSuggestModelEntry,
 } from "./types";
+import { shouldUseWebGPUForLocalAI } from "./environment";
 
 export type LoadProgress = { bytes: number; total: number };
 
-const llm = new WllamaService({
-  wasmPath: `/wllama/wllama.wasm`,
-  nCtx: 2048,
-  // Prefer WebGPU. Concurrent completions crash WebGPU — see suggest() queue.
-  nGpuLayers: 999,
-});
+const WASM_PATH = "/wllama/wllama.wasm";
+const CONTEXT_SIZE = 2048;
+const GPU_LAYERS = 999;
+
+class InMemoryStorageBackend {
+  private files = new Map<string, Blob>();
+
+  isSupported(): boolean {
+    return true;
+  }
+
+  read(key: string): Promise<Blob | null> {
+    return Promise.resolve(this.files.get(key) ?? null);
+  }
+
+  async write(key: string, stream: ReadableStream): Promise<void> {
+    this.files.set(key, await new Response(stream).blob());
+  }
+
+  getSize(key: string): Promise<number> {
+    return Promise.resolve(this.files.get(key)?.size ?? -1);
+  }
+
+  list(): Promise<Array<{ key: string; size: number }>> {
+    return Promise.resolve(
+      Array.from(this.files, ([key, file]) => ({ key, size: file.size })),
+    );
+  }
+
+  delete(key: string): Promise<void> {
+    this.files.delete(key);
+    return Promise.resolve();
+  }
+}
+
+function createCacheManager(): CacheManager {
+  try {
+    return new CacheManager();
+  } catch {
+    // Capacitor WebViews may not expose OPFS. Local GGUF files do not need a
+    // persistent cache, but Wllama still requires a supported cache backend.
+    return new CacheManager([new InMemoryStorageBackend()]);
+  }
+}
 
 class TextSuggestService {
+  private llm: Wllama | null = null;
   private loadedModelId: string | null = null;
   private loadingPromise: Promise<void> | null = null;
 
@@ -28,7 +67,9 @@ class TextSuggestService {
   private suggestSeq = 0;
 
   isModelLoaded(modelId: string): boolean {
-    return this.loadedModelId === modelId && !!llm.currentModel;
+    return (
+      this.loadedModelId === modelId && this.llm?.isModelLoaded() === true
+    );
   }
 
   async ensureLoadedFromFile(
@@ -53,13 +94,43 @@ class TextSuggestService {
     model: Pick<TextSuggestModelEntry, "id" | "label">,
     onProgress?: (p: LoadProgress) => void,
   ): Promise<void> {
-    const result = await llm.loadModel(file, (pct: number) =>
-      onProgress?.({ bytes: pct, total: 100 }),
+    await this.unload();
+
+    const llm = new Wllama(
+      { default: WASM_PATH },
+      { cacheManager: createCacheManager() },
     );
-    if (!result.success) {
-      throw new Error(result.error ?? "Failed to load model");
+    this.llm = llm;
+
+    try {
+      const useWebGPU = shouldUseWebGPUForLocalAI();
+      onProgress?.({ bytes: 10, total: 100 });
+      onProgress?.({ bytes: 30, total: 100 });
+      await llm.loadModel([file], {
+        n_ctx: CONTEXT_SIZE,
+        // Mobile WebGPU can produce corrupt logits for some architectures
+        // (notably Qwen), resulting in one garbage token repeated forever.
+        n_gpu_layers: useWebGPU ? GPU_LAYERS : 0,
+        jinja: true,
+      });
+      console.debug("[textSuggest] model loaded", {
+        model: model.label,
+        backend: useWebGPU ? "WebGPU" : "WASM/CPU",
+      });
+      this.loadedModelId = model.id;
+      onProgress?.({ bytes: 100, total: 100 });
+    } catch (error: unknown) {
+      try {
+        await llm.exit();
+      } catch {
+        // Preserve the original model-loading error.
+      }
+      if (this.llm === llm) this.llm = null;
+      this.loadedModelId = null;
+      throw error instanceof Error
+        ? error
+        : new Error("Failed to load model");
     }
-    this.loadedModelId = model.id;
   }
 
   private buildSystemPrompt(maxTokens: number): string {
@@ -131,8 +202,8 @@ class TextSuggestService {
 
   /**
    * Queue a suggestion so only one generation runs at a time.
-   * Phi-3 / other instruct GGUFs need the chat template (`generate`), not
-   * raw `generateCompletion` — raw prompts often finish immediately with "".
+   * Phi-3 / other instruct GGUFs need the chat template
+   * (`createChatCompletion`), not raw `createCompletion` prompts.
    */
   async suggest(
     req: SuggestRequest,
@@ -142,7 +213,8 @@ class TextSuggestService {
       abortSignal?: AbortSignal;
     },
   ): Promise<SuggestResult> {
-    if (!llm.currentModel) {
+    const llm = this.llm;
+    if (!llm?.isModelLoaded()) {
       throw new Error("Model not loaded");
     }
 
@@ -155,12 +227,25 @@ class TextSuggestService {
       }
 
       const t0 = performance.now();
-      const result = await llm.generate({
-        system: this.buildSystemPrompt(maxTokens),
-        prompt: this.buildUserPrompt(req.prefix, maxTokens),
-        maxTokens,
+      const result = await llm.createChatCompletion({
+        messages: [
+          {
+            role: "system",
+            content: this.buildSystemPrompt(maxTokens),
+          },
+          {
+            role: "user",
+            content: this.buildUserPrompt(req.prefix, maxTokens),
+          },
+        ],
+        stream: false,
+        max_tokens: maxTokens,
         temperature: Math.max(opts.temperature, 0.35),
-        topP: 0.92,
+        top_k: 40,
+        top_p: 0.92,
+        min_p: 0.05,
+        penalty_last_n: 64,
+        penalty_repeat: 1.12,
         abortSignal: opts.abortSignal,
       });
 
@@ -168,17 +253,15 @@ class TextSuggestService {
         throw new DOMException("Suggestion superseded", "AbortError");
       }
 
-      if (!result.success) {
-        throw new Error(result.error ?? "Generation failed");
-      }
+      const rawText = result.choices[0]?.message.content ?? "";
 
       console.debug("[textSuggest] generate", {
         maxTokens,
-        rawText: result.text,
-        timeMs: result.timeMs,
+        rawText,
+        timeMs: performance.now() - t0,
       });
 
-      const text = this.normalizeContinuation(result.text ?? "", req.prefix);
+      const text = this.normalizeContinuation(rawText, req.prefix);
       return { text, msElapsed: performance.now() - t0 };
     };
 
@@ -199,8 +282,16 @@ class TextSuggestService {
   async unload(): Promise<void> {
     this.suggestSeq++;
     await this.generationTail;
-    await llm.unload();
+    const llm = this.llm;
+    this.llm = null;
     this.loadedModelId = null;
+    if (llm) {
+      try {
+        await llm.exit();
+      } catch {
+        // Ignore shutdown errors while releasing the current model.
+      }
+    }
   }
 }
 

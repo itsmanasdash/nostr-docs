@@ -245,8 +245,6 @@ function AppLayout() {
           <Outlet context={textSuggest} />
         </Box>
       </Box>
-
-    </ThemeProvider>
     </>
   );
 }
