@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTheme } from "@mui/material/styles";
 import { alpha } from "@mui/material/styles";
 import { fetchAllDocuments } from "../nostr/fetchFile.ts";
@@ -7,6 +7,7 @@ import {
   loadTrashedEvents,
   storeLocalEvent,
   markBroadcast,
+  removeLocalEvent,
 } from "../lib/localStore.ts";
 import { publishEvent } from "../nostr/publish.ts";
 import {
@@ -46,13 +47,17 @@ import { fetchDeleteRequests } from "../nostr/fetchDelete.ts";
 import { useUser } from "../contexts/UserContext.tsx";
 import { useNavigate } from "react-router-dom";
 import { useSharedPages } from "../contexts/SharedDocsContext.tsx";
+import { usePublished } from "../contexts/PublishedContext.tsx";
+import { KIND_LONGFORM, KIND_COMMUNITY_NIP } from "../utils/publishArticle.ts";
 import TrashDialog from "./TrashDialog.tsx";
 import { encodeNKeys } from "../utils/nkeys.ts";
 import { buildSharedDocPath } from "./editor/utils.ts";
 import { getEventAddress } from "../utils/helpers.ts";
 import { useDocMetadata } from "../contexts/DocMetadataContext.tsx";
 import RenameDialog from "./RenameDialog.tsx";
+import PublishArticleDialog from "./PublishArticleDialog.tsx";
 import EditOutlinedIcon from "@mui/icons-material/EditOutlined";
+import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import { IconButton } from "@mui/material";
 import DictationButton from "./dictation/DictationButton";
 
@@ -122,17 +127,39 @@ export default function DocumentList({
     selectedDocumentId,
     localOnlyAddresses,
     markLocalOnly,
+    unmarkVisited,
+    removeDocument,
   } = useDocumentContext();
+
+  // Remove a visited page from this device: drop it from the Visited tab and
+  // delete its local cache. It stays reachable via its original share link.
+  const handleRemoveVisited = async (address: string) => {
+    unmarkVisited(address);
+    removeDocument(address);
+    await removeLocalEvent(address).catch(() => {});
+  };
   const [docRelays, setDocRelays] = useState<Map<string, string[]>>(new Map());
 
   const { sharedDocuments, getKeys } = useSharedPages();
+  const { publishedDocuments } = usePublished();
+
+  // A page that's already in the Shared list shouldn't also show under Visited —
+  // once saved to Shared it's no longer just a transient visit.
+  const visitedOnly = useMemo(() => {
+    if (sharedDocuments.size === 0) return visitedDocuments;
+    const next = new Map(visitedDocuments);
+    for (const addr of sharedDocuments.keys()) next.delete(addr);
+    return next;
+  }, [visitedDocuments, sharedDocuments]);
   const { docTags, docTitles, setDocTitle, docSharedAs, allTags, selectedTag, setSelectedTag } = useDocMetadata();
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"personal" | "shared" | "visited">("personal");
+  const [tab, setTab] = useState<"personal" | "shared" | "visited" | "published">("personal");
   const [trashOpen, setTrashOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renamingAddress, setRenamingAddress] = useState<string | null>(null);
   const [renamingInitialTitle, setRenamingInitialTitle] = useState("");
+  // The published article/NIP event currently open in the edit dialog, if any.
+  const [editingArticle, setEditingArticle] = useState<Event | null>(null);
   const [trashCount, setTrashCount] = useState(0);
   const [query, setQuery] = useState("");
   const { user } = useUser();
@@ -142,7 +169,7 @@ export default function DocumentList({
   const searchHits = useDocSearch(
     visibleDocuments,
     sharedDocuments,
-    visitedDocuments,
+    visitedOnly,
     docTitles,
     docTags,
     query,
@@ -163,6 +190,13 @@ export default function DocumentList({
       pubkey: doc.pubkey,
       kind: doc.kind,
     });
+
+    // Published articles/NIPs open in the in-app reader, not the doc editor.
+    if (doc.kind === KIND_LONGFORM || doc.kind === KIND_COMMUNITY_NIP) {
+      navigate(`/article/${naddr}`);
+      return;
+    }
+
     const keys = getKeys(`${doc.kind}:${doc.pubkey}:${dTag}`);
 
     let path = `/doc/${naddr}`;
@@ -271,16 +305,18 @@ export default function DocumentList({
   };
 
   const allDocs =
-    tab === "personal" ? visibleDocuments
-    : tab === "shared"  ? sharedDocuments
-    :                     visitedDocuments;
+    tab === "personal"  ? visibleDocuments
+    : tab === "shared"    ? sharedDocuments
+    : tab === "published" ? publishedDocuments
+    :                       visitedOnly;
 
   // Auto-switch to the tab that owns the currently selected doc
   useEffect(() => {
     if (!selectedDocumentId) return;
     if (visibleDocuments.has(selectedDocumentId)) setTab("personal");
     else if (sharedDocuments.has(selectedDocumentId)) setTab("shared");
-    else if (visitedDocuments.has(selectedDocumentId)) setTab("visited");
+    else if (visitedOnly.has(selectedDocumentId)) setTab("visited");
+    else if (publishedDocuments.has(selectedDocumentId)) setTab("published");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDocumentId]);
 
@@ -302,7 +338,7 @@ export default function DocumentList({
     if (personal) return { history: personal, origin: "personal" };
     const shared = sharedDocuments.get(address);
     if (shared) return { history: shared, origin: "shared" };
-    const visit = visitedDocuments.get(address);
+    const visit = visitedOnly.get(address);
     if (visit) return { history: visit, origin: "visited" };
     return null;
   };
@@ -327,7 +363,8 @@ export default function DocumentList({
 
   const personalCount = visibleDocuments.size;
   const sharedCount = sharedDocuments.size;
-  const visitedCount = visitedDocuments.size;
+  const visitedCount = visitedOnly.size;
+  const publishedCount = publishedDocuments.size;
 
   return (
     <Box
@@ -449,6 +486,22 @@ export default function DocumentList({
             </Box>
           }
         />
+        <Tab
+          value="published"
+          label={
+            <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+              Published
+              {publishedCount > 0 && (
+                <Chip
+                  label={publishedCount}
+                  size="small"
+                  color="secondary"
+                  sx={{ height: 18, fontSize: "0.65rem" }}
+                />
+              )}
+            </Box>
+          }
+        />
       </Tabs>
 
       {/* Tag filter chips */}
@@ -515,6 +568,8 @@ export default function DocumentList({
                 ? "No documents yet.\nCreate your first page!"
                 : tab === "visited"
                 ? "No visited pages yet.\nOpen a shared link to see it here."
+                : tab === "published"
+                ? "Nothing published yet.\nUse Share → Publish to post an article or NIP."
                 : "No shared documents found."}
             </Typography>
             {!isSearching && tab === "personal" && (
@@ -542,8 +597,10 @@ export default function DocumentList({
               const relays = docRelays.get(address) ?? [];
 
               const customTitle = docTitles.get(address);
+              // Published articles/NIPs carry an authoritative `title` tag.
+              const titleTag = event.tags.find((t) => t[0] === "title")?.[1];
               const displayTitle =
-                customTitle || heuristicTitle(decryptedContent ?? "", 42) || "Untitled";
+                customTitle || titleTag || heuristicTitle(decryptedContent ?? "", 42) || "Untitled";
 
               const snippet =
                 isSearching && terms
@@ -598,23 +655,63 @@ export default function DocumentList({
                           >
                             {displayTitle}
                           </Box>
-                          <IconButton
-                            className="rename-btn"
-                            size="small"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setRenamingAddress(address);
-                              setRenamingInitialTitle(displayTitle);
-                              setRenameOpen(true);
-                            }}
-                            sx={{
-                              opacity: isSelected ? 1 : 0,
-                              transition: "opacity 0.2s",
-                              p: 0.25,
-                            }}
-                          >
-                            <EditOutlinedIcon sx={{ fontSize: 16 }} />
-                          </IconButton>
+                          {origin === "visited" ? (
+                            <Tooltip title="Remove from visited">
+                              <IconButton
+                                className="rename-btn"
+                                size="small"
+                                aria-label="Remove from visited"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void handleRemoveVisited(address);
+                                }}
+                                sx={{
+                                  opacity: isSelected ? 1 : 0,
+                                  transition: "opacity 0.2s",
+                                  p: 0.25,
+                                }}
+                              >
+                                <DeleteOutlineIcon sx={{ fontSize: 16 }} />
+                              </IconButton>
+                            </Tooltip>
+                          ) : origin === "published" ? (
+                            <Tooltip title="Edit published article">
+                              <IconButton
+                                className="rename-btn"
+                                size="small"
+                                aria-label="Edit published article"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingArticle(event);
+                                }}
+                                sx={{
+                                  opacity: isSelected ? 1 : 0,
+                                  transition: "opacity 0.2s",
+                                  p: 0.25,
+                                }}
+                              >
+                                <EditOutlinedIcon sx={{ fontSize: 16 }} />
+                              </IconButton>
+                            </Tooltip>
+                          ) : (
+                            <IconButton
+                              className="rename-btn"
+                              size="small"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setRenamingAddress(address);
+                                setRenamingInitialTitle(displayTitle);
+                                setRenameOpen(true);
+                              }}
+                              sx={{
+                                opacity: isSelected ? 1 : 0,
+                                transition: "opacity 0.2s",
+                                p: 0.25,
+                              }}
+                            >
+                              <EditOutlinedIcon sx={{ fontSize: 16 }} />
+                            </IconButton>
+                          )}
                         </Box>
                       }
                       secondary={
@@ -641,7 +738,7 @@ export default function DocumentList({
                                   lineHeight: 1.6,
                                 }}
                               >
-                                {origin === "personal" ? "Mine" : origin === "shared" ? "Shared" : "Visited"}
+                                {origin === "personal" ? "Mine" : origin === "shared" ? "Shared" : origin === "published" ? "Published" : "Visited"}
                               </Box>
                             )}
                           </Box>
@@ -850,6 +947,18 @@ export default function DocumentList({
             }
             await setDocTitle(renamingAddress, newTitle);
           }}
+        />
+      )}
+      {editingArticle && (
+        <PublishArticleDialog
+          key={editingArticle.id}
+          open
+          editEvent={editingArticle}
+          markdown={editingArticle.content}
+          target={
+            editingArticle.kind === KIND_COMMUNITY_NIP ? "communityNip" : "longform"
+          }
+          onClose={() => setEditingArticle(null)}
         />
       )}
     </Box>

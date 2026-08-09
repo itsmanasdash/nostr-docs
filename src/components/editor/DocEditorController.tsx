@@ -62,6 +62,7 @@ import {
   removeLocalEvent,
   trashLocalEvent,
   setLocalOnlyFlag,
+  clearVisitedFlag,
 } from "../../lib/localStore";
 
 import { EditorToolbar } from "./EditorToolbar";
@@ -69,6 +70,7 @@ import { DocEditorSurface } from "./DocEditorSurface";
 import { deleteEvent } from "../../nostr/deleteRequest";
 import ConfirmModal from "../common/ConfirmModal";
 import ShareModal from "../ShareModal";
+import PublishArticleDialog from "../PublishArticleDialog";
 import { buildShareUrl, buildSharedDocPath, handleGeneratePrivateLink, handleSharePublic } from "./utils";
 import { encryptContent } from "../../utils/encryption";
 import { encryptFile } from "../../utils/fileEncryption";
@@ -186,9 +188,10 @@ export function DocumentEditorController({
     addDocument,
     localOnlyAddresses,
     markLocalOnly,
+    unmarkVisited,
   } = useDocumentContext();
   const { addSharedDoc, getKeys } = useSharedPages();
-  const { setDocSharedAs, docSharedAs } = useDocMetadata();
+  const { setDocSharedAs, docSharedAs, docTags } = useDocMetadata();
 
   const navigate = useNavigate();
   const { relays } = useRelays();
@@ -216,6 +219,13 @@ export function DocumentEditorController({
   const commentsEnabled = !!viewKey && !!selectedDocumentId;
 
   const sharedAsUrl = sharedAsAddress ? buildSharedDocPath(sharedAsAddress, getKeys) : null;
+
+  // A page opened via someone else's shared link that isn't yet in the user's
+  // Shared list. Offer to promote it (Visited → Shared) — an explicit action so
+  // opening a link never silently writes metadata / prompts the signer.
+  const alreadyShared = selectedDocumentId ? getKeys(selectedDocumentId).length > 0 : false;
+  const isVisitedPage =
+    !!user && !isOwner && !!viewKey && !!selectedDocumentId && !alreadyShared;
 
   const versions =
     history?.versions.map((v) => ({
@@ -251,6 +261,8 @@ export function DocumentEditorController({
     severity: "success" | "error";
   }>({ open: false, message: "", severity: "success" });
   const [shareOpen, setShareOpen] = useState(false);
+  const [publishTarget, setPublishTarget] = useState<"longform" | "communityNip" | null>(null);
+  const [savingToShared, setSavingToShared] = useState(false);
   // Device-only state: for drafts tracked locally; for saved docs derived from context
   const [draftLocalOnly, setDraftLocalOnly] = useState(false);
   const isLocalOnly = isDraft
@@ -262,6 +274,27 @@ export function DocumentEditorController({
   const pendingDeleteLocalOnlyRef = useRef<boolean>(false);
   const [showComments, setShowComments] = useState(false);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
+
+  // Promote a visited page into the user's Shared list. Writes the metadata
+  // (once) so it syncs across devices, clears the local visited flag, and drops
+  // it from the Visited tab.
+  const handleSaveToShared = async () => {
+    if (!selectedDocumentId || !viewKey) return;
+    setSavingToShared(true);
+    try {
+      const tag = [selectedDocumentId, viewKey];
+      if (editKey) tag.push(editKey);
+      await addSharedDoc(tag);
+      await clearVisitedFlag(selectedDocumentId).catch(() => {});
+      unmarkVisited(selectedDocumentId);
+      setToast({ open: true, message: "Saved to your Shared pages.", severity: "success" });
+    } catch (err) {
+      console.error("Failed to save to Shared:", err);
+      setToast({ open: true, message: "Failed to save to Shared. Please try again.", severity: "error" });
+    } finally {
+      setSavingToShared(false);
+    }
+  };
   const [formDialogOpen, setFormDialogOpen] = useState(false);
   const [formsPickerOpen, setFormsPickerOpen] = useState(false);
 
@@ -290,11 +323,13 @@ export function DocumentEditorController({
   // Always-current flags read by the auto-save timer at fire time
   const isDraftRef = useRef(isDraft);
   const isViewOnlyRef = useRef(isViewOnly);
+  const selectedDocIdRef = useRef(selectedDocumentId);
 
   // Keep all synchronous refs current on every render
   modeRef.current = mode;
   isDraftRef.current = isDraft;
   isViewOnlyRef.current = isViewOnly;
+  selectedDocIdRef.current = selectedDocumentId;
 
   // Always-current upload function — avoids stale closures in editorProps handlers
   const uploadFileRef = useRef<(file: File) => Promise<void>>(async () => { });
@@ -596,10 +631,17 @@ export function DocumentEditorController({
     // Don't even set the timer if there's nothing to save
     if (md === lastSavedMdRef.current) return;
 
+    // Bind this timer to the document that was active when the edit was made.
+    // If the active document changes before the timer fires (e.g. the user
+    // switched pages or created a new one), we must NOT flush this content into
+    // whatever doc is now selected — that would overwrite an unrelated page.
+    const armedDocId = selectedDocIdRef.current;
+
     const timer = setTimeout(() => {
       if (isDraftRef.current) return;      // never auto-create new documents
       if (isViewOnlyRef.current) return;   // never save read-only views
       if (!mdRef.current.trim()) return;   // don't save blank content
+      if (selectedDocIdRef.current !== armedDocId) return; // doc switched — abort
       handleSaveRef.current(true);         // silent = true (no toast)
     }, AUTO_SAVE_DELAY_MS);
 
@@ -1025,6 +1067,39 @@ export function DocumentEditorController({
         </Box>
       )}
 
+      {isVisitedPage && (
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            px: 2,
+            py: 0.75,
+            borderRadius: 2,
+            bgcolor: (t) => t.palette.mode === "dark"
+              ? "rgba(255,255,255,0.05)"
+              : "rgba(0,0,0,0.04)",
+            border: "1px solid",
+            borderColor: "divider",
+            flexShrink: 0,
+          }}
+        >
+          <Typography variant="caption" color="text.secondary">
+            You're viewing a shared page. Save it to keep it in your Shared list across devices.
+          </Typography>
+          <Button
+            size="small"
+            variant="outlined"
+            color="secondary"
+            disabled={savingToShared}
+            onClick={handleSaveToShared}
+            sx={{ ml: 2, whiteSpace: "nowrap", fontSize: "0.72rem" }}
+          >
+            {savingToShared ? "Saving…" : "Save to Shared"}
+          </Button>
+        </Box>
+      )}
+
       {!isViewOnly && (
         <EditorToolbar
           saving={saving}
@@ -1358,10 +1433,23 @@ export function DocumentEditorController({
         onPick={handleFormCreated}
       />
 
+      <PublishArticleDialog
+        open={publishTarget !== null}
+        target={publishTarget ?? "longform"}
+        onClose={() => setPublishTarget(null)}
+        markdown={md}
+        initialTitle={getDocTitle()}
+        initialTags={selectedDocumentId ? (docTags.get(selectedDocumentId) ?? []) : []}
+      />
+
       <ShareModal
         open={shareOpen}
         onClose={() => setShareOpen(false)}
         onPublicPost={() => handleSharePublic()}
+        onPublish={(target) => {
+          setShareOpen(false);
+          setPublishTarget(target);
+        }}
         existingViewLink={existingViewLink}
         existingEditLink={existingEditLink}
         onPrivateLink={async (canEdit, rotate) => {

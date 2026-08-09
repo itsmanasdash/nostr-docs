@@ -16,18 +16,21 @@ import {
   IconButton,
 } from "@mui/material";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
+import ArticleIcon from "@mui/icons-material/Article";
+import DescriptionIcon from "@mui/icons-material/Description";
 import { useState } from "react";
 
 type Props = {
   open: boolean;
   onClose: () => void;
   onPublicPost?: () => void;
+  onPublish?: (target: "longform" | "communityNip") => void;
   onPrivateLink?: (canEdit: boolean, rotate?: boolean) => Promise<string | void>;
   existingViewLink?: string;
   existingEditLink?: string;
 };
 
-export default function ShareModal({ open, onClose, onPrivateLink, existingViewLink = "", existingEditLink = "" }: Props) {
+export default function ShareModal({ open, onClose, onPrivateLink, onPublish, existingViewLink = "", existingEditLink = "" }: Props) {
   const [canEdit, setCanEdit] = useState(false);
   const [generatedLink, setGeneratedLink] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -156,6 +159,38 @@ export default function ShareModal({ open, onClose, onPrivateLink, existingViewL
               />
             )}
           </Paper>
+
+          {/* PUBLISH PUBLICLY */}
+          {onPublish && (
+            <Paper variant="outlined" sx={{ p: 2 }}>
+              <Typography variant="h6" fontWeight={800}>
+                Publish publicly
+              </Typography>
+              <Typography color="text.secondary" sx={{ mb: 1 }}>
+                Post this page to Nostr for anyone to read — images become public.
+              </Typography>
+              <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap", mt: 1 }}>
+                <Button
+                  variant="outlined"
+                  color="secondary"
+                  startIcon={<ArticleIcon />}
+                  sx={{ fontWeight: 700 }}
+                  onClick={() => onPublish("longform")}
+                >
+                  Publish as Article
+                </Button>
+                <Button
+                  variant="outlined"
+                  color="secondary"
+                  startIcon={<DescriptionIcon />}
+                  sx={{ fontWeight: 700 }}
+                  onClick={() => onPublish("communityNip")}
+                >
+                  Publish as NIP
+                </Button>
+              </Box>
+            </Paper>
+          )}
         </DialogContent>
 
         <DialogActions>
