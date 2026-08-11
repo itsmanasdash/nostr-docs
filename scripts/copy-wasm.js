@@ -1,12 +1,15 @@
-const fs = require('fs');
-const path = require('path');
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 
 // Try multiple locations — monorepo hoists to root, standalone installs locally
 const possibleSrc = [
-  path.resolve(__dirname, '../node_modules/@wllama/wllama/esm/wasm/wllama.wasm'),
+  path.resolve(scriptDir, '../node_modules/@wllama/wllama/esm/wasm/wllama.wasm'),
 ];
 
-const dest = path.resolve(__dirname, '../public/wllama/wllama.wasm');
+const dest = path.resolve(scriptDir, '../public/wllama/wllama.wasm');
 
 const src = possibleSrc.find(p => fs.existsSync(p));
 if (!src) {

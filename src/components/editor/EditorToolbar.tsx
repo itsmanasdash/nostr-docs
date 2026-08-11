@@ -819,7 +819,6 @@ export function EditorToolbar({
                 size="small"
                 state={textSuggestState}
                 enabled={textSuggestEnabled}
-                onToggle={onToggleTextSuggest}
                 onSettingsSaved={onTextSuggestSettingsSaved ?? (() => {})}
               />
             )}

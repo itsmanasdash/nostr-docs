@@ -8,7 +8,6 @@ import TextSuggestSettingsDialog from "./TextSuggestSettingsDialog";
 interface Props {
   state: TextSuggestState;
   enabled: boolean;
-  onToggle: (next: boolean) => void;
   onSettingsSaved: () => void;
   size?: "small" | "medium";
 }
@@ -16,13 +15,12 @@ interface Props {
 export default function TextSuggestButton({
   state,
   enabled,
-  onToggle,
   onSettingsSaved,
   size = "small",
 }: Props) {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  let tooltip = "Enable AI text suggestions";
+  let tooltip = "AI writing settings";
   let icon = <AutoFixOffIcon fontSize={size} />;
   let color: "default" | "primary" | "error" = "default";
   let busy = false;
@@ -45,22 +43,11 @@ export default function TextSuggestButton({
     } else if (state.kind === "needs-setup") {
       tooltip = "Set up a model to start suggesting";
     } else {
-      tooltip = "AI text suggestions on — click to configure";
+      tooltip = "Local AI writing tools on — click to configure";
     }
   }
 
   const handleClick = () => {
-    if (!enabled) {
-      onToggle(true);
-      return;
-    }
-    if (state.kind === "needs-setup") {
-      setSettingsOpen(true);
-      return;
-    }
-    // Already enabled & configured — a normal click opens settings; long
-    // press / right click isn't needed since toggling off is one extra click
-    // away inside the dialog (keeps a single, discoverable affordance).
     setSettingsOpen(true);
   };
 
@@ -68,7 +55,13 @@ export default function TextSuggestButton({
     <>
       <Tooltip title={tooltip}>
         <Box component="span" sx={{ position: "relative", display: "inline-flex" }}>
-          <IconButton size={size} onClick={handleClick} color={color} disabled={busy}>
+          <IconButton
+            size={size}
+            onClick={handleClick}
+            color={color}
+            disabled={busy}
+            aria-label="AI writing settings"
+          >
             {busy ? <CircularProgress size={18} /> : icon}
           </IconButton>
         </Box>

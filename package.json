@@ -2,7 +2,7 @@
   "name": "Pages by Form*",
   "private": true,
   "version": "0.0.0",
-  "type": "commonjs",
+  "type": "module",
   "scripts": {
     "start": "npm run dev",
     "dev": "vite",

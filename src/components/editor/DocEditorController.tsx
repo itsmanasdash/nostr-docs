@@ -46,6 +46,12 @@ import {
   clearGhostSuggestion,
   ghostSuggestionPluginKey,
 } from "./extensions/GhostTextSuggestion";
+import {
+  AutoCorrection,
+  addAutoCorrection,
+  clearAutoCorrections,
+  findCompletedWord,
+} from "./extensions/AutoCorrection";
 import type { TextSuggestHook } from "../../hooks/useTextSuggest";
 import { SlashCommandMenu } from "./SlashCommandMenu";
 import type { SlashCommandItem } from "./extensions/SlashCommand";
@@ -96,6 +102,14 @@ import {
 const AUTO_SAVE_DELAY_MS = 30_000;
 
 type EditorMode = "edit" | "preview" | "split";
+
+type MarkdownStorage = {
+  markdown: { getMarkdown(): string };
+};
+
+function getEditorMarkdown(editor: Editor): string {
+  return (editor.storage as unknown as MarkdownStorage).markdown.getMarkdown();
+}
 
 function TagRow({ address }: { address: string }) {
   const { docTags, setDocTags } = useDocMetadata();
@@ -316,18 +330,27 @@ export function DocumentEditorController({
   const requestSuggestionRef = useRef(textSuggest.requestSuggestion);
   const clearSuggestionRef = useRef(textSuggest.clearSuggestion);
   const notifyCursorPosRef = useRef(textSuggest.notifyCursorPos);
+  const requestCorrectionRef = useRef(textSuggest.requestCorrection);
+  const clearCorrectionRef = useRef(textSuggest.clearCorrection);
   // Mirrors prefs.enabled for the onUpdate handler (the hook's state value
   // can lag a render behind a just-toggled setting).
   const textSuggestEnabledRef = useRef(false);
+  const autoCorrectEnabledRef = useRef(false);
   useEffect(() => {
     requestSuggestionRef.current = textSuggest.requestSuggestion;
     clearSuggestionRef.current = textSuggest.clearSuggestion;
     notifyCursorPosRef.current = textSuggest.notifyCursorPos;
+    requestCorrectionRef.current = textSuggest.requestCorrection;
+    clearCorrectionRef.current = textSuggest.clearCorrection;
     textSuggestEnabledRef.current = textSuggest.prefs?.enabled ?? false;
+    autoCorrectEnabledRef.current =
+      textSuggest.prefs?.autoCorrectEnabled ?? false;
   }, [
     textSuggest.requestSuggestion,
     textSuggest.clearSuggestion,
     textSuggest.notifyCursorPos,
+    textSuggest.requestCorrection,
+    textSuggest.clearCorrection,
     textSuggest.prefs,
   ]);
 
@@ -348,6 +371,7 @@ export function DocumentEditorController({
       TableCell,
       Indent,
       GhostTextSuggestion,
+      AutoCorrection,
       TableHandles,
       EncryptedFileNode,
       CommentHighlight,
@@ -535,22 +559,27 @@ export function DocumentEditorController({
       // setEditable dispatch) and would clobber textarea content with TipTap's
       // stale internal document.
       if (modeRef.current !== "edit") return;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const newMd = (editor.storage as any).markdown.getMarkdown() as string;
+      const newMd = getEditorMarkdown(editor);
       mdRef.current = newMd;
       setMd(newMd);
       setWordCount(editor.storage.characterCount.words());
       setCharCount(editor.storage.characterCount.characters());
 
-      // ── Local-AI ghost-text suggestion trigger ──────────────────────
+      // ── Local-AI writing tools trigger ──────────────────────────────
       // Plain-text slices around the cursor (not markdown — re-serializing
       // the whole doc on every keystroke just to get plain text would be
       // wasteful, and the model only needs to read prose, not markdown
       // syntax). Skipped entirely when the user hasn't turned this on.
-      if (!textSuggestEnabledRef.current) return;
+      if (
+        !textSuggestEnabledRef.current &&
+        !autoCorrectEnabledRef.current
+      ) {
+        return;
+      }
       const { selection } = editor.state;
       if (!selection.empty) {
         clearSuggestionRef.current();
+        clearCorrectionRef.current();
         return;
       }
       // Cap how much context we ship to the model per request — keeps
@@ -561,10 +590,38 @@ export function DocumentEditorController({
         selection.from,
         "\n",
       );
-      requestSuggestionRef.current(prefix, selection.from);
+
+      if (autoCorrectEnabledRef.current) {
+        const textInCurrentBlock = selection.$from.parent.textBetween(
+          0,
+          selection.$from.parentOffset,
+          "",
+        );
+        const completedWord = findCompletedWord(
+          textInCurrentBlock,
+          selection.from,
+        );
+        if (completedWord) {
+          requestCorrectionRef.current({
+            word: completedWord.original,
+            context: prefix,
+            from: completedWord.from,
+            to: completedWord.to,
+          });
+        }
+      }
+
+      if (textSuggestEnabledRef.current) {
+        requestSuggestionRef.current(prefix, selection.from);
+      }
     },
     onSelectionUpdate: ({ editor }) => {
-      if (!textSuggestEnabledRef.current) return;
+      if (
+        !textSuggestEnabledRef.current &&
+        !autoCorrectEnabledRef.current
+      ) {
+        return;
+      }
       const { selection } = editor.state;
       if (!selection.empty) {
         clearSuggestionRef.current();
@@ -583,6 +640,12 @@ export function DocumentEditorController({
     }
   }, [editor]);
 
+  const activeTextSuggestion = textSuggest.suggestion;
+  const activeTextCorrection = textSuggest.correction;
+  const localAIPrefs = textSuggest.prefs;
+  const clearTextSuggestion = textSuggest.clearSuggestion;
+  const clearTextCorrection = textSuggest.clearCorrection;
+
   /* ── Push local-AI suggestions into the ghost-text decoration ──── */
   // The useTextSuggest hook owns *when* to suggest (debounce, model
   // loading, abort-on-keystroke); this effect just reflects its result
@@ -590,19 +653,43 @@ export function DocumentEditorController({
   // still at the position the suggestion was requested for.
   useEffect(() => {
     if (!editor) return;
-    if (textSuggest.suggestion) {
-      const { text, pos } = textSuggest.suggestion;
+    if (activeTextSuggestion) {
+      const { text, pos } = activeTextSuggestion;
       const { selection } = editor.state;
       if (selection.empty && selection.from === pos) {
         setGhostSuggestion(editor.view, text, pos);
       } else {
         // Cursor moved while the model was thinking — ignore.
-        textSuggest.clearSuggestion();
+        clearTextSuggestion();
       }
     } else {
       clearGhostSuggestion(editor.view);
     }
-  }, [editor, textSuggest.suggestion]);
+  }, [editor, activeTextSuggestion, clearTextSuggestion]);
+
+  /* ── Add GGUF typo results as persistent tappable squiggles ─────── */
+  useEffect(() => {
+    if (!editor || !activeTextCorrection) return;
+    addAutoCorrection(editor.view, activeTextCorrection);
+  }, [editor, activeTextCorrection]);
+
+  useEffect(() => {
+    if (!editor) return;
+    if (!localAIPrefs?.enabled) {
+      clearGhostSuggestion(editor.view);
+      clearTextSuggestion();
+    }
+    if (!localAIPrefs?.autoCorrectEnabled) {
+      clearAutoCorrections(editor.view);
+      clearTextCorrection();
+    }
+  }, [
+    editor,
+    localAIPrefs?.enabled,
+    localAIPrefs?.autoCorrectEnabled,
+    clearTextSuggestion,
+    clearTextCorrection,
+  ]);
 
   /* ── Accept/dismiss feedback for the ghost-text extension ───────── */
   // Tap/Tab/Escape inside GhostTextSuggestion clear the ProseMirror
@@ -614,15 +701,15 @@ export function DocumentEditorController({
     if (!editor) return;
     const onTransaction = () => {
       const ghost = ghostSuggestionPluginKey.getState(editor.state);
-      if (!ghost?.text && textSuggest.suggestion) {
-        textSuggest.clearSuggestion();
+      if (!ghost?.text && activeTextSuggestion) {
+        clearTextSuggestion();
       }
     };
     editor.on("transaction", onTransaction);
     return () => {
       editor.off("transaction", onTransaction);
     };
-  }, [editor, textSuggest]);
+  }, [editor, activeTextSuggestion, clearTextSuggestion]);
 
   /* ── Update editor editable state when mode changes ───── */
   useEffect(() => {
@@ -948,10 +1035,9 @@ export function DocumentEditorController({
 
     // In WYSIWYG mode, read from editor (avoids stale React state).
     // In split/preview mode, mdRef is updated by the textarea onChange.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const mdToSave =
       mode === "edit" && editor
-        ? ((editor.storage as any).markdown.getMarkdown() as string)
+        ? getEditorMarkdown(editor)
         : mdRef.current;
 
     if (mdToSave === lastSavedMdRef.current) return;
@@ -1167,7 +1253,10 @@ export function DocumentEditorController({
           heuristicTitle={getDocTitle()}
           hasEditKey={!!editKey}
           textSuggestState={textSuggest.state}
-          textSuggestEnabled={textSuggest.prefs?.enabled ?? false}
+          textSuggestEnabled={
+            (textSuggest.prefs?.enabled ?? false) ||
+            (textSuggest.prefs?.autoCorrectEnabled ?? false)
+          }
           onToggleTextSuggest={(next) => {
             if (!textSuggest.prefs) return;
             void textSuggest.updatePrefs({ ...textSuggest.prefs, enabled: next });

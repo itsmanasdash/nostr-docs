@@ -1,6 +1,5 @@
 // src/nostr/nostr.d.ts
 
-import type { UnsignedEvent } from "nostr-tools";
 import type { WindowNostr } from "nostr-tools/nip07";
 
 declare global {

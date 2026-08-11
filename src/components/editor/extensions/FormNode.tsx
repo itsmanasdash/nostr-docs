@@ -25,7 +25,9 @@ function decodeNaddr(naddr: string) {
   try {
     const decoded = nip19.decode(naddr);
     if (decoded.type === "naddr") return { formId: decoded.data.identifier, formPubkey: decoded.data.pubkey };
-  } catch {}
+  } catch {
+    // Invalid addresses are handled by returning null below.
+  }
   return null;
 }
 

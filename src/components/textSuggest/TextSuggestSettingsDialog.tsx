@@ -18,12 +18,16 @@ import {
   Slider,
   CircularProgress,
   LinearProgress,
+  Chip,
 } from "@mui/material";
 import DeleteIcon from "@mui/icons-material/Delete";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import RadioButtonUncheckedIcon from "@mui/icons-material/RadioButtonUnchecked";
 import { loadPrefs, savePrefs } from "../../lib/textSuggest/prefs";
-import { makeModelId } from "../../lib/textSuggest/modelCatalog";
+import {
+  makeModelId,
+  RECOMMENDED_GGUF_MODELS,
+} from "../../lib/textSuggest/modelCatalog";
 import { textSuggestService } from "../../lib/textSuggest/wllamaService";
 import { RuntimeCapabilities } from "./RuntimeCapabilities";
 import type {
@@ -86,7 +90,7 @@ export default function TextSuggestSettingsDialog({ open, onClose, onSaved }: Pr
         ...prefs,
         models: [...prefs.models, entry],
         activeModelId: entry.id,
-        enabled: true,
+        enabled: prefs.enabled || !prefs.autoCorrectEnabled,
       });
     } catch (err) {
       URL.revokeObjectURL(objectUrl);
@@ -134,6 +138,11 @@ export default function TextSuggestSettingsDialog({ open, onClose, onSaved }: Pr
     await persist({ ...prefs, enabled });
   };
 
+  const toggleAutoCorrect = async (autoCorrectEnabled: boolean) => {
+    if (!prefs) return;
+    await persist({ ...prefs, autoCorrectEnabled });
+  };
+
   if (!prefs) {
     return (
       <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
@@ -146,11 +155,11 @@ export default function TextSuggestSettingsDialog({ open, onClose, onSaved }: Pr
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>Text suggestions</DialogTitle>
+      <DialogTitle>Local AI writing</DialogTitle>
       <DialogContent>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          As you type, a local AI model suggests the next few words as a plain
-          continuation of your document. Press{" "}
+          A local AI model can suggest the next few words and check completed
+          words for likely typos. Press{" "}
           <strong>Tab</strong> or tap the ghost text to accept,{" "}
           <strong>Esc</strong> to dismiss.
         </Typography>
@@ -158,7 +167,7 @@ export default function TextSuggestSettingsDialog({ open, onClose, onSaved }: Pr
         <RuntimeCapabilities />
 
         <FormControlLabel
-          sx={{ mb: 2 }}
+          sx={{ mb: 0.5 }}
           control={
             <Switch
               checked={prefs.enabled}
@@ -167,6 +176,26 @@ export default function TextSuggestSettingsDialog({ open, onClose, onSaved }: Pr
           }
           label="Enable text suggestions"
         />
+
+        <FormControlLabel
+          sx={{ display: "flex", mb: 0.25 }}
+          control={
+            <Switch
+              checked={prefs.autoCorrectEnabled}
+              onChange={(e) => toggleAutoCorrect(e.target.checked)}
+            />
+          }
+          label="Enable AI autocorrection"
+        />
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ display: "block", ml: 6, mb: 2 }}
+        >
+          Checks completed words with the GGUF model. Tap a red squiggly word
+          to apply its correction. It can run together with text suggestions;
+          typo checks are queued first.
+        </Typography>
 
         <Divider sx={{ mb: 2 }} />
 
@@ -224,8 +253,78 @@ export default function TextSuggestSettingsDialog({ open, onClose, onSaved }: Pr
         <Typography variant="overline" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>
           Add a model
         </Typography>
-        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
-          Load a .gguf file.
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Download a model below, return here, then choose the downloaded
+          <strong> .gguf</strong> file. Models run locally and are not uploaded.
+        </Alert>
+
+        <Box sx={{ display: "grid", gap: 1.25, mb: 2 }}>
+          {RECOMMENDED_GGUF_MODELS.map((model) => (
+            <Box
+              key={model.id}
+              sx={{
+                border: 1,
+                borderColor: "divider",
+                borderRadius: 1.5,
+                p: 1.5,
+              }}
+            >
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                  gap: 0.75,
+                  mb: 0.5,
+                }}
+              >
+                <Typography variant="subtitle2">{model.name}</Typography>
+                <Chip size="small" label={model.badge} />
+                <Typography variant="caption" color="text.secondary">
+                  {model.size}
+                </Typography>
+              </Box>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ display: "block", mb: 1 }}
+              >
+                {model.description}
+              </Typography>
+              <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+                <Button
+                  component="a"
+                  href={model.downloadUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  size="small"
+                  variant={
+                    model.badge === "Recommended" ? "contained" : "outlined"
+                  }
+                >
+                  Download GGUF
+                </Button>
+                <Button
+                  component="a"
+                  href={model.detailsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  size="small"
+                >
+                  Model details
+                </Button>
+              </Box>
+            </Box>
+          ))}
+        </Box>
+
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ display: "block", mb: 1 }}
+        >
+          Already have a GGUF? Choose it from your device. For other models,
+          look for an instruct or chat GGUF and prefer a Q4_K_M quantization.
         </Typography>
         <Box>
           <input
@@ -241,7 +340,7 @@ export default function TextSuggestSettingsDialog({ open, onClose, onSaved }: Pr
             onClick={() => fileInputRef.current?.click()}
             disabled={loading}
           >
-            Load GGUF file
+            Choose downloaded GGUF
           </Button>
         </Box>
 

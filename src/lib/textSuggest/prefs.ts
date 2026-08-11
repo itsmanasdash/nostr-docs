@@ -25,6 +25,7 @@ function safeMerge(parsed: unknown): TextSuggestPrefs {
   const p = parsed as Partial<TextSuggestPrefs>;
   return {
     enabled: Boolean(p.enabled),
+    autoCorrectEnabled: Boolean(p.autoCorrectEnabled),
     models: sessionModels,
     activeModelId: sessionActiveModelId,
     debounceMs:

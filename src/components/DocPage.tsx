@@ -18,8 +18,8 @@ export default function DocPage({
 }) {
   const { naddr } = useParams<{ naddr: string }>();
   const location = useLocation();
-  const textSuggest =
-    textSuggestOverride ?? useOutletContext<TextSuggestHook>();
+  const outletTextSuggest = useOutletContext<TextSuggestHook>();
+  const textSuggest = textSuggestOverride ?? outletTextSuggest;
   const { documents, setSelectedDocumentId, addDocument } =
     useDocumentContext();
   const { relays } = useRelays();

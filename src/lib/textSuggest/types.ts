@@ -13,6 +13,8 @@ export interface TextSuggestModelEntry {
 
 export interface TextSuggestPrefs {
   enabled: boolean;
+  /** Underline likely misspellings and offer a tap-to-apply correction. */
+  autoCorrectEnabled: boolean;
   /** All models the user has configured. Empty until they add one. */
   models: TextSuggestModelEntry[];
   /** Which configured model is active. Null = none configured yet. */
@@ -34,6 +36,7 @@ export const DEFAULT_TEMPERATURE = 0.35;
 
 export const DEFAULT_PREFS: TextSuggestPrefs = {
   enabled: false,
+  autoCorrectEnabled: false,
   models: [],
   activeModelId: null,
   debounceMs: DEFAULT_DEBOUNCE_MS,
@@ -58,5 +61,16 @@ export interface SuggestRequest {
 
 export interface SuggestResult {
   text: string;
+  msElapsed: number;
+}
+
+export interface CorrectWordRequest {
+  word: string;
+  /** Nearby document text ending just after the candidate word. */
+  context: string;
+}
+
+export interface CorrectWordResult {
+  replacement: string | null;
   msElapsed: number;
 }

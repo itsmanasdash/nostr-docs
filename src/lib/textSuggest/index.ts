@@ -12,5 +12,7 @@ export {
   resolveActiveModel,
   suggestedLabel,
   formatBytes,
+  RECOMMENDED_GGUF_MODELS,
 } from "./modelCatalog";
+export type { RecommendedGGUFModel } from "./modelCatalog";
 export * from "./types";

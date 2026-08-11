@@ -1,5 +1,7 @@
 import { CacheManager, Wllama } from "@wllama/wllama/esm/index.js";
 import type {
+  CorrectWordRequest,
+  CorrectWordResult,
   SuggestRequest,
   SuggestResult,
   TextSuggestModelEntry,
@@ -65,6 +67,7 @@ class TextSuggestService {
    */
   private generationTail: Promise<void> = Promise.resolve();
   private suggestSeq = 0;
+  private correctionSeq = 0;
 
   isModelLoaded(modelId: string): boolean {
     return (
@@ -165,14 +168,14 @@ class TextSuggestService {
       .replace(/^[\s]*["'`]+/, "")
       .replace(/["'`]+[\s]*$/, "")
       .replace(
-        /^\s*(?:Sure[.,]?|Okay[.,]?|Alright[.,]?|Here(?:'s| is)?(?: the)?(?: continuation| next words| text)?(?:[:\-])?\s*)/i,
+        /^\s*(?:Sure[.,]?|Okay[.,]?|Alright[.,]?|Here(?:'s| is)?(?: the)?(?: continuation| next words| text)?(?::|-)?\s*)/i,
         "",
       )
       .replace(
         /^\s*(?:Certainly[.,]?|Of course[.,]?|I'd be happy to[^.\n]*[.!]?\s*)/i,
         "",
       )
-      .replace(/^\s*(?:Continuation|Next words)\s*[:\-]\s*/i, "");
+      .replace(/^\s*(?:Continuation|Next words)\s*(?::|-)\s*/i, "");
 
     const echo = prefix.slice(-40).trim();
     if (echo && out.toLowerCase().startsWith(echo.toLowerCase())) {
@@ -198,6 +201,55 @@ class TextSuggestService {
     }
 
     return out;
+  }
+
+  private normalizeCorrection(text: string, original: string): string | null {
+    let replacement = text
+      .replace(/\r/g, "")
+      .split("\n", 1)[0]
+      .replace(/^\s*(?:correction|corrected word|replacement)\s*:\s*/i, "")
+      .trim()
+      .replace(/^["'`]+|["'`]+$/g, "")
+      .replace(/[.,;:!?]+$/, "")
+      .trim();
+
+    if (/^(?:same|unchanged|correct|none)$/i.test(replacement)) return null;
+    if (replacement.toLocaleLowerCase() === original.toLocaleLowerCase()) {
+      return null;
+    }
+
+    // A correction must remain one word. This rejects explanations, model
+    // chatter, and malformed output from very small local models.
+    if (
+      !/^[\p{L}\p{M}]+(?:['’-][\p{L}\p{M}]+)*$/u.test(replacement) ||
+      replacement.length > Math.max(32, original.length * 3)
+    ) {
+      return null;
+    }
+
+    if (original === original.toLocaleUpperCase()) {
+      replacement = replacement.toLocaleUpperCase();
+    } else if (/^\p{Lu}/u.test(original)) {
+      replacement =
+        replacement.charAt(0).toLocaleUpperCase() + replacement.slice(1);
+    }
+
+    return replacement;
+  }
+
+  private async enqueueGeneration<T>(run: () => Promise<T>): Promise<T> {
+    const previous = this.generationTail;
+    let release!: () => void;
+    this.generationTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    try {
+      await previous;
+      return await run();
+    } finally {
+      release();
+    }
   }
 
   /**
@@ -265,22 +317,78 @@ class TextSuggestService {
       return { text, msElapsed: performance.now() - t0 };
     };
 
-    const previous = this.generationTail;
-    let release!: () => void;
-    this.generationTail = new Promise<void>((resolve) => {
-      release = resolve;
-    });
+    return this.enqueueGeneration(run);
+  }
 
-    try {
-      await previous;
-      return await run();
-    } finally {
-      release();
+  /**
+   * Check one completed word for a likely spelling/typing error. Corrections
+   * share the same serial queue as autocomplete, so both features can safely
+   * use one Wllama instance without overlapping WebGPU/WASM work.
+   */
+  async correctWord(
+    req: CorrectWordRequest,
+    opts: { abortSignal?: AbortSignal } = {},
+  ): Promise<CorrectWordResult> {
+    const llm = this.llm;
+    if (!llm?.isModelLoaded()) {
+      throw new Error("Model not loaded");
     }
+
+    const mySeq = ++this.correctionSeq;
+    const run = async (): Promise<CorrectWordResult> => {
+      if (mySeq !== this.correctionSeq || opts.abortSignal?.aborted) {
+        throw new DOMException("Correction superseded", "AbortError");
+      }
+
+      const t0 = performance.now();
+      const context = req.context.slice(-500);
+      const result = await llm.createChatCompletion({
+        messages: [
+          {
+            role: "system",
+            content: [
+              "You are a conservative spelling and typing-error checker.",
+              "Given one candidate word and its nearby document context, output the corrected single word only.",
+              "Preserve the language and intended capitalization.",
+              "Do not rewrite grammar or expand abbreviations.",
+              "If the word is already correct, is a name, slang, technical term, abbreviation, or you are unsure, output SAME.",
+              "Never output punctuation, quotes, JSON, or an explanation.",
+            ].join(" "),
+          },
+          {
+            role: "user",
+            content: `Context:\n---\n${context}\n---\nCandidate word: ${req.word}`,
+          },
+        ],
+        stream: false,
+        max_tokens: 12,
+        temperature: 0,
+        top_k: 1,
+        top_p: 1,
+        abortSignal: opts.abortSignal,
+      });
+
+      if (mySeq !== this.correctionSeq || opts.abortSignal?.aborted) {
+        throw new DOMException("Correction superseded", "AbortError");
+      }
+
+      const rawText = result.choices[0]?.message.content ?? "";
+      const replacement = this.normalizeCorrection(rawText, req.word);
+      console.debug("[textSuggest] correction", {
+        word: req.word,
+        rawText,
+        replacement,
+        timeMs: performance.now() - t0,
+      });
+      return { replacement, msElapsed: performance.now() - t0 };
+    };
+
+    return this.enqueueGeneration(run);
   }
 
   async unload(): Promise<void> {
     this.suggestSeq++;
+    this.correctionSeq++;
     await this.generationTail;
     const llm = this.llm;
     this.llm = null;

@@ -14,14 +14,34 @@ export interface TextSuggestion {
   pos: number;
 }
 
+export interface TextCorrection {
+  id: string;
+  original: string;
+  replacement: string;
+  from: number;
+  to: number;
+}
+
+export interface TextCorrectionRequest {
+  word: string;
+  context: string;
+  from: number;
+  to: number;
+}
+
 interface UseTextSuggestReturn {
   state: TextSuggestState;
   prefs: TextSuggestPrefs | null;
   suggestion: TextSuggestion | null;
+  correction: TextCorrection | null;
   /** Call on every doc change with the text before the cursor. Debounced internally. */
   requestSuggestion: (prefix: string, cursorPos: number) => void;
   /** Clear the current suggestion immediately (e.g. cursor moved, user kept typing past it). */
   clearSuggestion: () => void;
+  /** Check a completed word and return a conservative tap-to-apply correction. */
+  requestCorrection: (request: TextCorrectionRequest) => void;
+  /** Cancel a correction request that has not been applied to the editor yet. */
+  clearCorrection: () => void;
   /**
    * Call on selection-only cursor moves. Aborts pending/shown suggestions
    * unless the cursor is still at the position they were requested for.
@@ -33,10 +53,15 @@ interface UseTextSuggestReturn {
   removeActiveModel: () => Promise<void>;
 }
 
+function hasEnabledFeature(value: TextSuggestPrefs): boolean {
+  return value.enabled || value.autoCorrectEnabled;
+}
+
 export function useTextSuggest(): UseTextSuggestReturn {
   const [state, setState] = useState<TextSuggestState>({ kind: "disabled" });
   const [prefs, setPrefs] = useState<TextSuggestPrefs | null>(null);
   const [suggestion, setSuggestion] = useState<TextSuggestion | null>(null);
+  const [correction, setCorrection] = useState<TextCorrection | null>(null);
 
   const prefsRef = useRef<TextSuggestPrefs | null>(null);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -48,6 +73,12 @@ export function useTextSuggest(): UseTextSuggestReturn {
   const pendingPosRef = useRef<number | null>(null);
   const suggestionRef = useRef<TextSuggestion | null>(null);
   suggestionRef.current = suggestion;
+  const correctionDebounceTimer = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const correctionAbortRef = useRef<AbortController | null>(null);
+  const correctionRequestIdRef = useRef(0);
+  const lastCorrectionKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -56,7 +87,7 @@ export function useTextSuggest(): UseTextSuggestReturn {
       prefsRef.current = p;
       setPrefs(p);
       setState(
-        !p.enabled
+        !hasEnabledFeature(p)
           ? { kind: "disabled" }
           : resolveActiveModel(p)
             ? { kind: "ready" }
@@ -73,7 +104,7 @@ export function useTextSuggest(): UseTextSuggestReturn {
     prefsRef.current = next;
     setPrefs(next);
     setState(
-      !next.enabled
+      !hasEnabledFeature(next)
         ? { kind: "disabled" }
         : resolveActiveModel(next)
           ? { kind: "ready" }
@@ -85,9 +116,8 @@ export function useTextSuggest(): UseTextSuggestReturn {
     prefsRef.current = next;
     setPrefs(next);
     await savePrefs(next);
-    if (!next.enabled) {
+    if (!hasEnabledFeature(next)) {
       setState({ kind: "disabled" });
-      await textSuggestService.unload();
     } else {
       setState(resolveActiveModel(next) ? { kind: "ready" } : { kind: "needs-setup" });
     }
@@ -104,7 +134,7 @@ export function useTextSuggest(): UseTextSuggestReturn {
 
     const nextPrefs: TextSuggestPrefs = {
       ...currentPrefs,
-      enabled: true,
+      enabled: currentPrefs.enabled || !currentPrefs.autoCorrectEnabled,
       models: [...currentPrefs.models, model],
       activeModelId: model.id,
     };
@@ -137,6 +167,8 @@ export function useTextSuggest(): UseTextSuggestReturn {
     const nextPrefs: TextSuggestPrefs = {
       ...currentPrefs,
       enabled: currentPrefs.enabled && nextModels.length > 0,
+      autoCorrectEnabled:
+        currentPrefs.autoCorrectEnabled && nextModels.length > 0,
       models: nextModels,
       activeModelId: nextModels[0]?.id ?? null,
     };
@@ -145,7 +177,11 @@ export function useTextSuggest(): UseTextSuggestReturn {
     setPrefs(nextPrefs);
     await savePrefs(nextPrefs);
     await textSuggestService.unload();
-    setState(nextPrefs.enabled ? { kind: "needs-setup" } : { kind: "disabled" });
+    setState(
+      hasEnabledFeature(nextPrefs)
+        ? { kind: "needs-setup" }
+        : { kind: "disabled" },
+    );
   }, []);
 
   const clearSuggestion = useCallback(() => {
@@ -174,6 +210,100 @@ export function useTextSuggest(): UseTextSuggestReturn {
     },
     [clearSuggestion],
   );
+
+  const clearCorrection = useCallback(() => {
+    setCorrection(null);
+    if (correctionDebounceTimer.current) {
+      clearTimeout(correctionDebounceTimer.current);
+      correctionDebounceTimer.current = null;
+    }
+    correctionAbortRef.current?.abort();
+    correctionAbortRef.current = null;
+    correctionRequestIdRef.current++;
+  }, []);
+
+  const requestCorrection = useCallback((request: TextCorrectionRequest) => {
+    const currentPrefs = prefsRef.current;
+    if (!currentPrefs?.autoCorrectEnabled) return;
+    const model = resolveActiveModel(currentPrefs);
+    if (!model || request.word.length < 3) return;
+
+    const requestKey = [
+      request.from,
+      request.to,
+      request.word,
+      request.context.slice(-80),
+    ].join(":");
+    if (lastCorrectionKeyRef.current === requestKey) return;
+    lastCorrectionKeyRef.current = requestKey;
+
+    if (correctionDebounceTimer.current) {
+      clearTimeout(correctionDebounceTimer.current);
+    }
+    correctionAbortRef.current?.abort();
+    correctionAbortRef.current = null;
+    setCorrection(null);
+
+    const myRequestId = ++correctionRequestIdRef.current;
+    // Autocorrection starts first when both tools are enabled. Autocomplete
+    // uses the user-configured (normally longer) debounce and then waits in
+    // the service's shared serial generation queue.
+    const debounceMs = Math.min(400, currentPrefs.debounceMs);
+    correctionDebounceTimer.current = setTimeout(async () => {
+      if (myRequestId !== correctionRequestIdRef.current) return;
+      const latestPrefs = prefsRef.current;
+      if (!latestPrefs?.autoCorrectEnabled) return;
+      const latestModel = resolveActiveModel(latestPrefs);
+      if (!latestModel) return;
+
+      const controller = new AbortController();
+      correctionAbortRef.current = controller;
+      try {
+        if (!textSuggestService.isModelLoaded(latestModel.id)) {
+          setState({
+            kind: "error",
+            message:
+              "Model not loaded. Open Local AI settings and load a GGUF file.",
+          });
+          return;
+        }
+
+        const result = await textSuggestService.correctWord(
+          { word: request.word, context: request.context },
+          { abortSignal: controller.signal },
+        );
+        if (
+          myRequestId !== correctionRequestIdRef.current ||
+          controller.signal.aborted ||
+          !result.replacement
+        ) {
+          return;
+        }
+
+        setCorrection({
+          id: `${myRequestId}:${request.from}:${request.word}`,
+          original: request.word,
+          replacement: result.replacement,
+          from: request.from,
+          to: request.to,
+        });
+      } catch (err) {
+        if (myRequestId !== correctionRequestIdRef.current) return;
+        const isAbort =
+          err instanceof Error &&
+          (err.name === "AbortError" || /abort|superseded/i.test(err.message));
+        if (!isAbort) {
+          const message = err instanceof Error ? err.message : String(err);
+          console.error("[textSuggest] correction error", {
+            requestId: myRequestId,
+            word: request.word,
+            error: err,
+          });
+          setState({ kind: "error", message });
+        }
+      }
+    }, debounceMs);
+  }, []);
 
   const requestSuggestion = useCallback((prefix: string, cursorPos: number) => {
     const currentPrefs = prefsRef.current;
@@ -311,6 +441,10 @@ export function useTextSuggest(): UseTextSuggestReturn {
     return () => {
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
       abortRef.current?.abort();
+      if (correctionDebounceTimer.current) {
+        clearTimeout(correctionDebounceTimer.current);
+      }
+      correctionAbortRef.current?.abort();
     };
   }, []);
 
@@ -318,8 +452,11 @@ export function useTextSuggest(): UseTextSuggestReturn {
     state,
     prefs,
     suggestion,
+    correction,
     requestSuggestion,
     clearSuggestion,
+    requestCorrection,
+    clearCorrection,
     notifyCursorPos,
     reload,
     updatePrefs,
