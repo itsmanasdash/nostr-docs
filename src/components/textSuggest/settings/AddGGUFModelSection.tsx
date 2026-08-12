@@ -7,6 +7,7 @@ import {
   Typography,
 } from "@mui/material";
 import type { LoadProgress } from "../../../lib/textSuggest/wllamaService";
+import { HuggingFaceGGUFSearch } from "./HuggingFaceGGUFSearch";
 import { RecommendedModelList } from "./RecommendedModelList";
 
 interface Props {
@@ -42,13 +43,14 @@ export function AddGGUFModelSection({ loading, progress, onFile }: Props) {
         <strong> .gguf</strong> file. Models run locally and are not uploaded.
       </Alert>
       <RecommendedModelList />
+      <HuggingFaceGGUFSearch />
       <Typography
         variant="caption"
         color="text.secondary"
         sx={{ display: "block", mb: 1 }}
       >
-        Already have a GGUF? Choose it from your device. For other models, look
-        for an instruct or chat GGUF and prefer a Q4_K_M quantization.
+        Choose any compatible GGUF downloaded to your device. The three models
+        above are recommendations, not a restriction.
       </Typography>
       <Box>
         <input

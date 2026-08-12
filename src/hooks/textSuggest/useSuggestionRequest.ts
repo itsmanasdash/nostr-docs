@@ -39,7 +39,10 @@ export function useSuggestionRequest({ prefsRef, setState }: Options) {
     abortRef.current?.abort();
     abortRef.current = null;
     requestIdRef.current++;
-  }, []);
+    setState((state) =>
+      state.kind === "thinking" ? { kind: "ready" } : state,
+    );
+  }, [setState]);
 
   const notifyCursorPos = useCallback(
     (cursorPos: number) => {

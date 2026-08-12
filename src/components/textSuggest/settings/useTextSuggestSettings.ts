@@ -11,7 +11,7 @@ import type {
 
 export function useTextSuggestSettings(
   open: boolean,
-  onSaved?: () => void,
+  onSaved?: () => void | Promise<void>,
 ) {
   const [prefs, setPrefs] = useState<TextSuggestPrefs | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -32,7 +32,7 @@ export function useTextSuggestSettings(
     async (next: TextSuggestPrefs) => {
       setPrefs(next);
       await savePrefs(next);
-      onSaved?.();
+      await onSaved?.();
     },
     [onSaved],
   );
@@ -71,7 +71,7 @@ export function useTextSuggestSettings(
           ...prefs,
           models: [...prefs.models, entry],
           activeModelId: entry.id,
-          enabled: prefs.enabled || !prefs.autoCorrectEnabled,
+          enabled: prefs.enabled,
         });
       } catch (cause) {
         URL.revokeObjectURL(objectUrl);
