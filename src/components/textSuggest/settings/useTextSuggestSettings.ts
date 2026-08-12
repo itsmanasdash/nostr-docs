@@ -71,7 +71,6 @@ export function useTextSuggestSettings(
           ...prefs,
           models: [...prefs.models, entry],
           activeModelId: entry.id,
-          enabled: prefs.enabled || !prefs.autoCorrectEnabled,
         });
       } catch (cause) {
         URL.revokeObjectURL(objectUrl);

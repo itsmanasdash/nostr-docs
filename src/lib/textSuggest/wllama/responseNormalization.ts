@@ -38,35 +38,22 @@ export function normalizeContinuation(text: string, prefix: string): string {
   return output;
 }
 
-export function normalizeCorrection(
+export function normalizeProofreading(
   text: string,
-  original: string,
-): string | null {
-  let replacement = text
-    .replace(/\r/g, "")
-    .split("\n", 1)[0]
-    .replace(/^\s*(?:correction|corrected word|replacement)\s*:\s*/i, "")
-    .trim()
-    .replace(/^["'`]+|["'`]+$/g, "")
-    .replace(/[.,;:!?]+$/, "")
+  originalChunk: string,
+): string {
+  let output = text.replace(/\r/g, "").trim();
+  output = output
+    .replace(/^```(?:markdown|md|text)?\s*\n?/i, "")
+    .replace(/\n?```\s*$/, "")
+    .replace(/^\s*(?:revised|proofread|corrected)\s+(?:text|document)\s*:\s*/i, "")
+    .replace(/^<document>\s*\n?/i, "")
+    .replace(/\n?\s*<\/document>$/i, "")
     .trim();
 
-  if (/^(?:same|unchanged|correct|none)$/i.test(replacement)) return null;
-  if (replacement.toLocaleLowerCase() === original.toLocaleLowerCase()) {
-    return null;
-  }
-  if (
-    !/^[\p{L}\p{M}]+(?:['’-][\p{L}\p{M}]+)*$/u.test(replacement) ||
-    replacement.length > Math.max(32, original.length * 3)
-  ) {
-    return null;
-  }
+  if (!output) return originalChunk;
 
-  if (original === original.toLocaleUpperCase()) {
-    replacement = replacement.toLocaleUpperCase();
-  } else if (/^\p{Lu}/u.test(original)) {
-    replacement =
-      replacement.charAt(0).toLocaleUpperCase() + replacement.slice(1);
-  }
-  return replacement;
+  const leading = originalChunk.match(/^\s*/)?.[0] ?? "";
+  const trailing = originalChunk.match(/\s*$/)?.[0] ?? "";
+  return `${leading}${output}${trailing}`;
 }

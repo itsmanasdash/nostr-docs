@@ -3,22 +3,18 @@ import { loadPrefs, savePrefs } from "../lib/textSuggest/prefs";
 import { makeModelId, resolveActiveModel } from "../lib/textSuggest/modelCatalog";
 import { textSuggestService } from "../lib/textSuggest/wllamaService";
 import type {
+  ProofreadResult,
   TextSuggestModelEntry,
   TextSuggestPrefs,
   TextSuggestState,
 } from "../lib/textSuggest/types";
 import { useSuggestionRequest } from "./textSuggest/useSuggestionRequest";
-import { useCorrectionRequest } from "./textSuggest/useCorrectionRequest";
 import type { UseTextSuggestReturn } from "./textSuggest/types";
 
-export type {
-  TextCorrection,
-  TextCorrectionRequest,
-  TextSuggestion,
-} from "./textSuggest/types";
+export type { TextSuggestion } from "./textSuggest/types";
 
 function hasEnabledFeature(prefs: TextSuggestPrefs): boolean {
-  return prefs.enabled || prefs.autoCorrectEnabled;
+  return prefs.enabled;
 }
 
 function stateForPrefs(prefs: TextSuggestPrefs): TextSuggestState {
@@ -30,8 +26,9 @@ export function useTextSuggest(): UseTextSuggestReturn {
   const [state, setState] = useState<TextSuggestState>({ kind: "disabled" });
   const [prefs, setPrefs] = useState<TextSuggestPrefs | null>(null);
   const prefsRef = useRef<TextSuggestPrefs | null>(null);
+  const proofreadAbortRef = useRef<AbortController | null>(null);
   const suggestionRequest = useSuggestionRequest({ prefsRef, setState });
-  const correctionRequest = useCorrectionRequest({ prefsRef, setState });
+  const clearSuggestion = suggestionRequest.clearSuggestion;
 
   const applyPrefs = useCallback((next: TextSuggestPrefs) => {
     prefsRef.current = next;
@@ -71,7 +68,6 @@ export function useTextSuggest(): UseTextSuggestReturn {
     };
     const nextPrefs: TextSuggestPrefs = {
       ...currentPrefs,
-      enabled: currentPrefs.enabled || !currentPrefs.autoCorrectEnabled,
       models: [...currentPrefs.models, model],
       activeModelId: model.id,
     };
@@ -108,7 +104,6 @@ export function useTextSuggest(): UseTextSuggestReturn {
     const nextPrefs: TextSuggestPrefs = {
       ...currentPrefs,
       enabled: currentPrefs.enabled && models.length > 0,
-      autoCorrectEnabled: currentPrefs.autoCorrectEnabled && models.length > 0,
       models,
       activeModelId: models[0]?.id ?? null,
     };
@@ -120,11 +115,65 @@ export function useTextSuggest(): UseTextSuggestReturn {
     setState(stateForPrefs(nextPrefs));
   }, []);
 
+  const proofread = useCallback(
+    async (
+      document: string,
+      instruction: string,
+    ): Promise<ProofreadResult> => {
+      const currentPrefs = prefsRef.current ?? (await loadPrefs());
+      const model = resolveActiveModel(currentPrefs);
+      if (!model || !textSuggestService.isModelLoaded(model.id)) {
+        const error = new Error(
+          "Model not loaded. Open Local AI settings and choose a GGUF file.",
+        );
+        setState({ kind: "error", message: error.message });
+        throw error;
+      }
+      if (!document.trim()) throw new Error("The document is empty.");
+      if (!instruction.trim()) {
+        throw new Error("Enter what the proofreader should do.");
+      }
+
+      clearSuggestion();
+      proofreadAbortRef.current?.abort();
+      const controller = new AbortController();
+      proofreadAbortRef.current = controller;
+      setState({ kind: "thinking" });
+      try {
+        const result = await textSuggestService.proofread(
+          { document, instruction: instruction.trim() },
+          { abortSignal: controller.signal },
+        );
+        if (proofreadAbortRef.current === controller) {
+          setState(stateForPrefs(prefsRef.current ?? currentPrefs));
+        }
+        return result;
+      } catch (cause) {
+        if (controller.signal.aborted) throw cause;
+        const message = cause instanceof Error ? cause.message : String(cause);
+        setState({ kind: "error", message });
+        throw cause;
+      } finally {
+        if (proofreadAbortRef.current === controller) {
+          proofreadAbortRef.current = null;
+        }
+      }
+    },
+    [clearSuggestion],
+  );
+
+  useEffect(
+    () => () => {
+      proofreadAbortRef.current?.abort();
+    },
+    [],
+  );
+
   return {
     state,
     prefs,
     ...suggestionRequest,
-    ...correctionRequest,
+    proofread,
     reload,
     updatePrefs,
     loadModelFromFile,

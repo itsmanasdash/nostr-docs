@@ -94,6 +94,8 @@ type Props = {
   textSuggestEnabled?: boolean;
   onToggleTextSuggest?: (next: boolean) => void;
   onTextSuggestSettingsSaved?: () => void;
+  onProofread?: (instruction: string) => Promise<void>;
+  hasDocumentText?: boolean;
 };
 
 export function EditorToolbar({
@@ -128,6 +130,8 @@ export function EditorToolbar({
   textSuggestEnabled = false,
   onToggleTextSuggest,
   onTextSuggestSettingsSaved,
+  onProofread,
+  hasDocumentText = false,
 }: Props) {
   const { user, loginModal } = useUser();
   const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
@@ -814,12 +818,14 @@ export function EditorToolbar({
             />
 
             {/* AI text suggestions */}
-            {onToggleTextSuggest && (
+            {onToggleTextSuggest && onProofread && (
               <TextSuggestButton
                 size="small"
                 state={textSuggestState}
                 enabled={textSuggestEnabled}
                 onSettingsSaved={onTextSuggestSettingsSaved ?? (() => {})}
+                onProofread={onProofread}
+                hasDocumentText={hasDocumentText}
               />
             )}
 

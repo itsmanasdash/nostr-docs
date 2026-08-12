@@ -46,13 +46,11 @@ import {
   clearGhostSuggestion,
   ghostSuggestionPluginKey,
 } from "./extensions/GhostTextSuggestion";
-import {
-  AutoCorrection,
-  addAutoCorrection,
-  clearAutoCorrections,
-  findCompletedWord,
-} from "./extensions/AutoCorrection";
 import type { TextSuggestHook } from "../../hooks/useTextSuggest";
+import {
+  ProofreadingReviewPanel,
+  type ProofreadingReview,
+} from "../textSuggest/ProofreadingReviewPanel";
 import { SlashCommandMenu } from "./SlashCommandMenu";
 import type { SlashCommandItem } from "./extensions/SlashCommand";
 import type { SlashCommandMenuHandle } from "./SlashCommandMenu";
@@ -250,6 +248,8 @@ export function DocumentEditorController({
   const initialContent = activeVersion?.decryptedContent ?? "";
 
   const [md, setMd] = useState(initialContent);
+  const [proofreadingReview, setProofreadingReview] =
+    useState<ProofreadingReview | null>(null);
   const [mode, setMode] = useState<EditorMode>(
     isViewOnly || !isDraft ? "preview" : "edit",
   );
@@ -330,27 +330,18 @@ export function DocumentEditorController({
   const requestSuggestionRef = useRef(textSuggest.requestSuggestion);
   const clearSuggestionRef = useRef(textSuggest.clearSuggestion);
   const notifyCursorPosRef = useRef(textSuggest.notifyCursorPos);
-  const requestCorrectionRef = useRef(textSuggest.requestCorrection);
-  const clearCorrectionRef = useRef(textSuggest.clearCorrection);
   // Mirrors prefs.enabled for the onUpdate handler (the hook's state value
   // can lag a render behind a just-toggled setting).
   const textSuggestEnabledRef = useRef(false);
-  const autoCorrectEnabledRef = useRef(false);
   useEffect(() => {
     requestSuggestionRef.current = textSuggest.requestSuggestion;
     clearSuggestionRef.current = textSuggest.clearSuggestion;
     notifyCursorPosRef.current = textSuggest.notifyCursorPos;
-    requestCorrectionRef.current = textSuggest.requestCorrection;
-    clearCorrectionRef.current = textSuggest.clearCorrection;
     textSuggestEnabledRef.current = textSuggest.prefs?.enabled ?? false;
-    autoCorrectEnabledRef.current =
-      textSuggest.prefs?.autoCorrectEnabled ?? false;
   }, [
     textSuggest.requestSuggestion,
     textSuggest.clearSuggestion,
     textSuggest.notifyCursorPos,
-    textSuggest.requestCorrection,
-    textSuggest.clearCorrection,
     textSuggest.prefs,
   ]);
 
@@ -371,7 +362,6 @@ export function DocumentEditorController({
       TableCell,
       Indent,
       GhostTextSuggestion,
-      AutoCorrection,
       TableHandles,
       EncryptedFileNode,
       CommentHighlight,
@@ -570,16 +560,10 @@ export function DocumentEditorController({
       // the whole doc on every keystroke just to get plain text would be
       // wasteful, and the model only needs to read prose, not markdown
       // syntax). Skipped entirely when the user hasn't turned this on.
-      if (
-        !textSuggestEnabledRef.current &&
-        !autoCorrectEnabledRef.current
-      ) {
-        return;
-      }
+      if (!textSuggestEnabledRef.current) return;
       const { selection } = editor.state;
       if (!selection.empty) {
         clearSuggestionRef.current();
-        clearCorrectionRef.current();
         return;
       }
       // Cap how much context we ship to the model per request — keeps
@@ -591,37 +575,10 @@ export function DocumentEditorController({
         "\n",
       );
 
-      if (autoCorrectEnabledRef.current) {
-        const textInCurrentBlock = selection.$from.parent.textBetween(
-          0,
-          selection.$from.parentOffset,
-          "",
-        );
-        const completedWord = findCompletedWord(
-          textInCurrentBlock,
-          selection.from,
-        );
-        if (completedWord) {
-          requestCorrectionRef.current({
-            word: completedWord.original,
-            context: prefix,
-            from: completedWord.from,
-            to: completedWord.to,
-          });
-        }
-      }
-
-      if (textSuggestEnabledRef.current) {
-        requestSuggestionRef.current(prefix, selection.from);
-      }
+      requestSuggestionRef.current(prefix, selection.from);
     },
     onSelectionUpdate: ({ editor }) => {
-      if (
-        !textSuggestEnabledRef.current &&
-        !autoCorrectEnabledRef.current
-      ) {
-        return;
-      }
+      if (!textSuggestEnabledRef.current) return;
       const { selection } = editor.state;
       if (!selection.empty) {
         clearSuggestionRef.current();
@@ -641,10 +598,8 @@ export function DocumentEditorController({
   }, [editor]);
 
   const activeTextSuggestion = textSuggest.suggestion;
-  const activeTextCorrection = textSuggest.correction;
   const localAIPrefs = textSuggest.prefs;
   const clearTextSuggestion = textSuggest.clearSuggestion;
-  const clearTextCorrection = textSuggest.clearCorrection;
 
   /* ── Push local-AI suggestions into the ghost-text decoration ──── */
   // The useTextSuggest hook owns *when* to suggest (debounce, model
@@ -667,28 +622,16 @@ export function DocumentEditorController({
     }
   }, [editor, activeTextSuggestion, clearTextSuggestion]);
 
-  /* ── Add GGUF typo results as persistent tappable squiggles ─────── */
-  useEffect(() => {
-    if (!editor || !activeTextCorrection) return;
-    addAutoCorrection(editor.view, activeTextCorrection);
-  }, [editor, activeTextCorrection]);
-
   useEffect(() => {
     if (!editor) return;
     if (!localAIPrefs?.enabled) {
       clearGhostSuggestion(editor.view);
       clearTextSuggestion();
     }
-    if (!localAIPrefs?.autoCorrectEnabled) {
-      clearAutoCorrections(editor.view);
-      clearTextCorrection();
-    }
   }, [
     editor,
     localAIPrefs?.enabled,
-    localAIPrefs?.autoCorrectEnabled,
     clearTextSuggestion,
-    clearTextCorrection,
   ]);
 
   /* ── Accept/dismiss feedback for the ghost-text extension ───────── */
@@ -710,6 +653,65 @@ export function DocumentEditorController({
       editor.off("transaction", onTransaction);
     };
   }, [editor, activeTextSuggestion, clearTextSuggestion]);
+
+  const handleProofread = async (instruction: string) => {
+    const original = mdRef.current;
+    const result = await textSuggest.proofread(original, instruction);
+    if (mdRef.current !== original) {
+      throw new Error(
+        "The document changed while proofreading. Run proofreading again to review an up-to-date result.",
+      );
+    }
+    if (result.text === original) {
+      setToast({
+        open: true,
+        message: "Proofreading found no changes.",
+        severity: "success",
+      });
+      return;
+    }
+    setProofreadingReview({
+      original,
+      revised: result.text,
+      instruction: instruction.trim(),
+    });
+  };
+
+  const acceptProofreading = () => {
+    if (!proofreadingReview) return;
+    if (mdRef.current !== proofreadingReview.original) {
+      setProofreadingReview(null);
+      setToast({
+        open: true,
+        message: "The document changed. Run proofreading again.",
+        severity: "error",
+      });
+      return;
+    }
+
+    const revised = proofreadingReview.revised;
+    mdRef.current = revised;
+    setMd(revised);
+    if (editor) {
+      // setContent dispatches one ProseMirror transaction, so the complete AI
+      // revision can be undone as a single editor action.
+      editor.commands.setContent(revised, { emitUpdate: false });
+      setWordCount(editor.storage.characterCount.words());
+      setCharCount(editor.storage.characterCount.characters());
+    }
+    setProofreadingReview(null);
+    setToast({
+      open: true,
+      message: "Proofreading changes accepted.",
+      severity: "success",
+    });
+  };
+
+  useEffect(() => {
+    setProofreadingReview((current) =>
+      current && current.original !== md ? null : current,
+    );
+  }, [md]);
 
   /* ── Update editor editable state when mode changes ───── */
   useEffect(() => {
@@ -1254,14 +1256,15 @@ export function DocumentEditorController({
           hasEditKey={!!editKey}
           textSuggestState={textSuggest.state}
           textSuggestEnabled={
-            (textSuggest.prefs?.enabled ?? false) ||
-            (textSuggest.prefs?.autoCorrectEnabled ?? false)
+            textSuggest.prefs?.enabled ?? false
           }
           onToggleTextSuggest={(next) => {
             if (!textSuggest.prefs) return;
             void textSuggest.updatePrefs({ ...textSuggest.prefs, enabled: next });
           }}
           onTextSuggestSettingsSaved={() => void textSuggest.reload()}
+          onProofread={handleProofread}
+          hasDocumentText={Boolean(md.trim())}
         />
       )}
       {isViewOnly && commentsEnabled && (
@@ -1290,6 +1293,13 @@ export function DocumentEditorController({
       >
         {!isViewOnly && selectedDocumentId && (
           <TagRow address={selectedDocumentId} />
+        )}
+        {proofreadingReview && (
+          <ProofreadingReviewPanel
+            review={proofreadingReview}
+            onAccept={acceptProofreading}
+            onReject={() => setProofreadingReview(null)}
+          />
         )}
         <DocEditorSurface
           value={md}

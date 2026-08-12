@@ -13,8 +13,8 @@ export interface TextSuggestModelEntry {
 
 export interface TextSuggestPrefs {
   enabled: boolean;
-  /** Underline likely misspellings and offer a tap-to-apply correction. */
-  autoCorrectEnabled: boolean;
+  /** Default instruction used for on-demand whole-document proofreading. */
+  proofreadInstruction: string;
   /** All models the user has configured. Empty until they add one. */
   models: TextSuggestModelEntry[];
   /** Which configured model is active. Null = none configured yet. */
@@ -33,10 +33,12 @@ export const DEFAULT_DEBOUNCE_MS = 700;
 /** Default suggestion budget; users can raise this in settings. */
 export const DEFAULT_MAX_TOKENS = 48;
 export const DEFAULT_TEMPERATURE = 0.35;
+export const DEFAULT_PROOFREAD_INSTRUCTION =
+  "Correct spelling, grammar, and punctuation while preserving the original meaning, tone, and Markdown formatting.";
 
 export const DEFAULT_PREFS: TextSuggestPrefs = {
   enabled: false,
-  autoCorrectEnabled: false,
+  proofreadInstruction: DEFAULT_PROOFREAD_INSTRUCTION,
   models: [],
   activeModelId: null,
   debounceMs: DEFAULT_DEBOUNCE_MS,
@@ -64,13 +66,14 @@ export interface SuggestResult {
   msElapsed: number;
 }
 
-export interface CorrectWordRequest {
-  word: string;
-  /** Nearby document text ending just after the candidate word. */
-  context: string;
+export interface ProofreadRequest {
+  /** Complete Markdown document. Long documents are processed in chunks. */
+  document: string;
+  /** User-authored transformation instruction. */
+  instruction: string;
 }
 
-export interface CorrectWordResult {
-  replacement: string | null;
+export interface ProofreadResult {
+  text: string;
   msElapsed: number;
 }

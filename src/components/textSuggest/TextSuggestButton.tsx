@@ -9,6 +9,8 @@ interface Props {
   state: TextSuggestState;
   enabled: boolean;
   onSettingsSaved: () => void;
+  onProofread: (instruction: string) => Promise<void>;
+  hasDocumentText: boolean;
   size?: "small" | "medium";
 }
 
@@ -16,6 +18,8 @@ export default function TextSuggestButton({
   state,
   enabled,
   onSettingsSaved,
+  onProofread,
+  hasDocumentText,
   size = "small",
 }: Props) {
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -70,6 +74,8 @@ export default function TextSuggestButton({
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         onSaved={onSettingsSaved}
+        onProofread={onProofread}
+        hasDocumentText={hasDocumentText}
       />
     </>
   );

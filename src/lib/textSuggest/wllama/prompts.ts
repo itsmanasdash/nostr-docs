@@ -1,5 +1,3 @@
-import type { CorrectWordRequest } from "../types";
-
 interface ChatMessage {
   role: "system" | "user";
   content: string;
@@ -32,21 +30,25 @@ export function buildSuggestionMessages(
   ];
 }
 
-export function buildCorrectionMessages(req: CorrectWordRequest): ChatMessage[] {
+export function buildProofreadingMessages(
+  documentChunk: string,
+  instruction: string,
+): ChatMessage[] {
   const system = [
-    "You are a conservative spelling and typing-error checker.",
-    "Given one candidate word and its nearby document context, output the corrected single word only.",
-    "Preserve the language and intended capitalization.",
-    "Do not rewrite grammar or expand abbreviations.",
-    "If the word is already correct, is a name, slang, technical term, abbreviation, or you are unsure, output SAME.",
-    "Never output punctuation, quotes, JSON, or an explanation.",
+    "You are a document proofreader inside a Markdown editor.",
+    "Apply the user's instruction to the supplied document chunk.",
+    "Preserve every part of the content unless the instruction requires changing it.",
+    "Preserve Markdown structure, links, custom HTML elements, code, and formatting.",
+    "Never add commentary, explanations, labels, quotation marks, or code fences.",
+    "Output only the complete revised document chunk.",
   ].join(" ");
-  const context = req.context.slice(-500);
   return [
     { role: "system", content: system },
     {
       role: "user",
-      content: `Context:\n---\n${context}\n---\nCandidate word: ${req.word}`,
+      content:
+        `Instruction:\n${instruction.trim()}\n\n` +
+        `<document>\n${documentChunk}\n</document>`,
     },
   ];
 }
