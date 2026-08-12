@@ -30,6 +30,30 @@
   height: 0;
 }
 
+/* ── Local-AI ghost-text suggestion (src/components/editor/extensions/GhostTextSuggestion.ts) ── */
+.ai-ghost-suggestion {
+  color: rgba(150, 150, 150, 0.65);
+  cursor: pointer;
+  pointer-events: auto;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  white-space: pre-wrap;
+}
+
+/* GGUF-powered typo suggestion. Tap/click the word to apply the replacement. */
+.ai-auto-correction {
+  text-decoration-line: underline;
+  text-decoration-style: wavy;
+  text-decoration-color: #d32f2f;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
 .tiptap h1 { font-size: 2em;   font-weight: 800; margin: 0.5em 0; }
 .tiptap h2 { font-size: 1.5em; font-weight: 700; margin: 0.5em 0; }
 .tiptap h3 { font-size: 1.17em;font-weight: 600; margin: 0.5em 0; }

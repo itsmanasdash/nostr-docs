@@ -1,0 +1,78 @@
+import {
+  Alert,
+  Button,
+  CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Divider,
+} from "@mui/material";
+import { AddGGUFModelSection } from "./settings/AddGGUFModelSection";
+import { AIWritingFeatureSettings } from "./settings/AIWritingFeatureSettings";
+import { ConfiguredModelList } from "./settings/ConfiguredModelList";
+import { SuggestionBehaviorSettings } from "./settings/SuggestionBehaviorSettings";
+import { useTextSuggestSettings } from "./settings/useTextSuggestSettings";
+
+interface Props {
+  open: boolean;
+  onClose: () => void;
+  onSaved?: () => void;
+}
+
+export default function TextSuggestSettingsDialog({
+  open,
+  onClose,
+  onSaved,
+}: Props) {
+  const settings = useTextSuggestSettings(open, onSaved);
+  const { prefs } = settings;
+
+  if (!prefs) {
+    return (
+      <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+        <DialogContent sx={{ display: "flex", justifyContent: "center", py: 6 }}>
+          <CircularProgress size={28} />
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>Local AI writing</DialogTitle>
+      <DialogContent>
+        <AIWritingFeatureSettings
+          prefs={prefs}
+          onPatch={(patch) => void settings.patchPrefs(patch)}
+        />
+        <Divider sx={{ mb: 2 }} />
+        <ConfiguredModelList
+          prefs={prefs}
+          busyId={settings.busyId}
+          onSelect={(id) => void settings.selectModel(id)}
+          onRemove={(id) => void settings.removeModel(id)}
+        />
+        <Divider sx={{ mb: 2 }} />
+        <AddGGUFModelSection
+          loading={settings.loading}
+          progress={settings.loadingProgress}
+          onFile={settings.addModelFromFile}
+        />
+        <SuggestionBehaviorSettings
+          prefs={prefs}
+          onPreview={settings.previewPrefs}
+          onCommit={(patch) => void settings.patchPrefs(patch)}
+        />
+        {settings.error && (
+          <Alert severity="error" sx={{ mt: 2 }}>
+            {settings.error}
+          </Alert>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Done</Button>
+      </DialogActions>
+    </Dialog>
+  );
+}

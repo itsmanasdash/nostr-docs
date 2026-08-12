@@ -1,4 +1,4 @@
-import type { EventTemplate } from "nostr-tools";
+import type { Event, EventTemplate } from "nostr-tools";
 import { pool } from "./relayPool";
 import { publishEvent } from "./publish";
 import { signerManager } from "../signer";
@@ -17,7 +17,7 @@ export async function fetchAllDocMetadata(
   pubkey: string,
 ): Promise<Map<string, DocMetadata>> {
   return new Promise((resolve) => {
-    const events: any[] = [];
+    const events: Event[] = [];
     const seenIds = new Set<string>();
     let settled = false;
 

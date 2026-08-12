@@ -10,6 +10,10 @@ nostr-docs flows end to end. These are **health checks**, not UI specs.
   core spine.
 - **sidebar-list** — a saved document syncs back from the relay into the sidebar
   on load and reopens from there (the list read + open-from-list path).
+- **ai-writing** — verifies the Local AI writing settings, preference
+  persistence, recommended GGUF links, Wllama model-loading options, correction
+  normalization, serialized correction/autocomplete generation, and that an
+  already-loaded session model survives disabling and re-enabling both tools.
 
 ## Running
 

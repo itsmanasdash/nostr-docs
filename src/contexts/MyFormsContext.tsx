@@ -102,7 +102,9 @@ export function MyFormsProvider({ children }: { children: ReactNode }) {
         formId = decoded.data.identifier;
         formPubkey = decoded.data.pubkey;
       }
-    } catch {}
+    } catch {
+      // Leave the identifiers empty when the address is invalid.
+    }
     setForms((prev) => {
       if (prev.some((f) => f.formId && f.formId === formId && f.formPubkey === formPubkey)) return prev;
       return [{ naddr, nkeys, formId, formPubkey, name: "", fieldCount: 0, relay: "" }, ...prev];

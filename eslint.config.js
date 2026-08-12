@@ -19,5 +19,18 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      // These React Compiler-oriented rules were added to the hooks preset
+      // after this app was written. Adopt them incrementally instead of
+      // turning the existing codebase into lint errors overnight.
+      'react-hooks/refs': 'off',
+      'react-hooks/set-state-in-effect': 'off',
+      'react-hooks/static-components': 'off',
+      'react-refresh/only-export-components': 'warn',
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
+    },
   },
 ])
