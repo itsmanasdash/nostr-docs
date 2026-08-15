@@ -53,6 +53,8 @@ import {
 } from "./extensions/GhostTextSuggestion";
 import type { TextSuggestHook } from "../../hooks/useTextSuggest";
 import { ProofreadDiffView } from "../textSuggest/ProofreadDiffView";
+import { hasSameProtectedEmbeds } from "../../lib/textSuggest/textDiff";
+import { assertProofreadFormattingPreserved } from "../../lib/textSuggest/wllama/markdownPreservation";
 import { SlashCommandMenu } from "./SlashCommandMenu";
 import type { SlashCommandItem } from "./extensions/SlashCommand";
 import type { SlashCommandMenuHandle } from "./SlashCommandMenu";
@@ -773,7 +775,7 @@ export function DocumentEditorController({
     });
   };
 
-  const acceptProofread = () => {
+  const acceptProofread = (acceptedDocument: string) => {
     if (!editor || !proofreadReview) return;
     if (
       mdRef.current !== proofreadReview.before ||
@@ -783,6 +785,44 @@ export function DocumentEditorController({
       setToast({
         open: true,
         message: "The document changed. Run proofreading again before accepting.",
+        severity: "error",
+      });
+      return;
+    }
+
+    if (acceptedDocument === proofreadReview.before) {
+      setProofreadReview(null);
+      setToast({
+        open: true,
+        message: "No proofreading changes accepted. Your document was not changed.",
+        severity: "success",
+      });
+      return;
+    }
+
+    if (!hasSameProtectedEmbeds(proofreadReview.before, acceptedDocument)) {
+      setToast({
+        open: true,
+        message:
+          "Those selections would alter a protected file or form embed. Restore the related change or reject all.",
+        severity: "error",
+      });
+      return;
+    }
+
+    try {
+      assertProofreadFormattingPreserved(
+        proofreadReview.before,
+        acceptedDocument,
+        proofreadReview.instruction,
+      );
+    } catch (error) {
+      setToast({
+        open: true,
+        message:
+          error instanceof Error
+            ? error.message
+            : "Those selections would change Markdown formatting. Restore the related change or reject all.",
         severity: "error",
       });
       return;
@@ -803,7 +843,7 @@ export function DocumentEditorController({
         );
       }
 
-      const candidateDoc = parseMarkdownDocument(editor, proofreadReview.after);
+      const candidateDoc = parseMarkdownDocument(editor, acceptedDocument);
       if (modeRef.current !== "edit") skipNextEditModeSyncRef.current = true;
       modeRef.current = "edit";
       setMode("edit");

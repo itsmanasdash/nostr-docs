@@ -129,6 +129,15 @@ test("AI writing settings expose text suggestions and free-form proofreading", a
   await expect(
     dialog.getByRole("heading", { name: "Proofread document" }),
   ).toBeVisible();
+  const proofreadSection = dialog.getByRole("button", {
+    name: "Proofread document",
+  });
+  await expect(proofreadSection).toHaveAttribute("aria-expanded", "false");
+  await expect(
+    dialog.getByRole("textbox", { name: "What should the proofreader do?" }),
+  ).toBeHidden();
+  await proofreadSection.click();
+  await expect(proofreadSection).toHaveAttribute("aria-expanded", "true");
   await expect(
     dialog.getByRole("button", {
       name: "Fix spelling, grammar, and punctuation",
@@ -146,12 +155,51 @@ test("AI writing settings expose text suggestions and free-form proofreading", a
     dialog.getByText("show a diff you can accept or reject", { exact: false }),
   ).toBeVisible();
 
+  await proofreadSection.click();
+  await expect(proofreadSection).toHaveAttribute("aria-expanded", "false");
+  await expect(instruction).toBeHidden();
+  await proofreadSection.click();
+  await expect(instruction).toBeVisible();
+
   await suggestions.click();
   await expect(suggestions).toBeChecked();
 
-  await expect(dialog.getByRole("link", { name: "Download GGUF" })).toHaveCount(
-    3,
+  const modelSetup = dialog.getByRole("button", { name: /Model setup/ });
+  await expect(modelSetup).toHaveAttribute("aria-expanded", "false");
+  const proofreadRadius = await dialog
+    .getByRole("region", { name: "Proofread document" })
+    .evaluate((element) => getComputedStyle(element).borderRadius);
+  const modelRadius = await modelSetup.evaluate(
+    (element) =>
+      getComputedStyle(element.closest(".MuiAccordion-root") as Element)
+        .borderRadius,
   );
+  expect(modelRadius).toBe(proofreadRadius);
+  await expect(
+    dialog.getByRole("link", { name: "Download GGUF" }).first(),
+  ).toBeHidden();
+  await modelSetup.click();
+  await expect(modelSetup).toHaveAttribute("aria-expanded", "true");
+  await expect(dialog.getByText("No models selected")).toBeVisible();
+  await expect(dialog.getByText("No model selected — expand to get one")).toHaveCount(0);
+  const chooseGguf = dialog.getByRole("button", {
+    name: "Choose downloaded GGUF",
+  });
+  await expect(chooseGguf).toBeVisible();
+  expect(
+    await chooseGguf.evaluate(
+      (element) => getComputedStyle(element.parentElement as Element).justifyContent,
+    ),
+  ).toBe("center");
+  const getModel = dialog.getByRole("button", { name: /Get a model/ });
+  await expect(getModel).toHaveAttribute("aria-expanded", "false");
+  await expect(dialog.getByRole("link", { name: "Download GGUF" })).toHaveCount(0);
+  await getModel.click();
+  await expect(getModel).toHaveAttribute("aria-expanded", "true");
+  await expect(dialog.getByRole("link", { name: "Download GGUF" })).toHaveCount(3);
+  await expect(
+    dialog.getByRole("link", { name: "Download GGUF" }).first(),
+  ).toBeVisible();
   await expect(
     dialog.getByRole("link", { name: "Model details" }),
   ).toHaveCount(3);
@@ -166,6 +214,7 @@ test("AI writing settings expose text suggestions and free-form proofreading", a
   await expect(dialog).toBeHidden();
   await settingsButton.click();
   await expect(suggestions).toBeChecked();
+  await expect(modelSetup).toHaveAttribute("aria-expanded", "false");
 });
 
 test("AI writing settings open other-model searches on Hugging Face", async ({
@@ -177,6 +226,8 @@ test("AI writing settings open other-model searches on Hugging Face", async ({
   const dialog = page
     .getByRole("dialog")
     .filter({ hasText: "Local AI writing" });
+  await dialog.getByRole("button", { name: /Model setup/ }).click();
+  await dialog.getByRole("button", { name: /Get a model/ }).click();
   await page.evaluate(() => {
     window.open = ((
       url?: string | URL,
@@ -194,7 +245,9 @@ test("AI writing settings open other-model searches on Hugging Face", async ({
   await dialog
     .getByRole("textbox", { name: "Search other GGUF models" })
     .fill("tiny llama");
-  await dialog.getByRole("button", { name: "Search Hugging Face" }).click();
+  await dialog
+    .getByRole("button", { name: "Search Hugging Face", exact: true })
+    .click();
 
   const opened = await page.evaluate(() =>
     Reflect.get(globalThis, "__openedHuggingFaceSearch"),
@@ -229,19 +282,24 @@ test("loading a GGUF does not auto-enable text suggestions", async ({
   const dialog = page
     .getByRole("dialog")
     .filter({ hasText: "Local AI writing" });
+  const modelSetup = dialog.getByRole("button", { name: /Model setup/ });
+  await modelSetup.click();
   await dialog.locator('input[type="file"]').setInputFiles({
     name: "session-model.gguf",
     mimeType: "application/octet-stream",
     buffer: Buffer.from("fake GGUF"),
   });
-  await expect(dialog.getByText("session-model.gguf", { exact: true })).toBeVisible();
+  await expect(modelSetup).toContainText("Active: session-model.gguf");
+  await expect(modelSetup).toHaveAttribute("aria-expanded", "false");
 
   const suggestions = dialog.getByRole("switch", {
     name: "Enable text suggestions",
   });
   await expect(suggestions).not.toBeChecked();
   await expect(
-    dialog.getByText("Choose a downloaded GGUF model below before proofreading."),
+    dialog.getByText(
+      "Open Model setup below and choose a downloaded GGUF before proofreading.",
+    ),
   ).toHaveCount(0);
 
   await dialog.getByRole("button", { name: "Done" }).click();
@@ -405,6 +463,264 @@ test("proofreading protects embeds and refuses unsafe context sizes", async ({
   expect(result.callCount).toBe(1);
 });
 
+test("proofreading keeps formatting locked unless the instruction opts in", async ({
+  page,
+}) => {
+  await useMockWllama(page);
+  await page.goto("/");
+
+  const result = await page.evaluate(async () => {
+    const servicePath = "/src/lib/textSuggest/wllamaService.ts";
+    const policyPath =
+      "/src/lib/textSuggest/wllama/markdownPreservation.ts";
+    const { textSuggestService } = await import(servicePath);
+    const { instructionAllowsMarkdownChanges } = await import(policyPath);
+    const model = { id: "custom:e2e-format-lock", label: "format-lock.gguf" };
+    await textSuggestService.ensureLoadedFromFile(
+      new File(["fake GGUF"], "format-lock.gguf"),
+      model,
+    );
+
+    const state = Reflect.get(globalThis, "__wllamaTest");
+    const plain = "This is teh short note.";
+    const corrected = "This is the short note.";
+
+    state.proofreadResponse = ["```markdown", corrected, "```"].join("\n");
+    const unwrapped = await textSuggestService.proofread({
+      document: plain,
+      instruction: "Fix spelling only. Keep the document as plain text.",
+    });
+
+    state.proofreadResponse = "This is the **short note**.";
+    let boldError = "";
+    try {
+      await textSuggestService.proofread({
+        document: plain,
+        instruction: "Fix spelling without changing Markdown formatting.",
+      });
+    } catch (error) {
+      boldError = error instanceof Error ? error.message : String(error);
+    }
+
+    state.proofreadResponse = "This is `the` short note.";
+    let backtickError = "";
+    try {
+      await textSuggestService.proofread({
+        document: plain,
+        instruction: "Fix spelling only.",
+      });
+    } catch (error) {
+      backtickError = error instanceof Error ? error.message : String(error);
+    }
+
+    const existingMarkdown = [
+      "# Release notes",
+      "",
+      "Use **teh API** with [the guide](https://example.com/guide).",
+      "",
+      "- Keep the first item.",
+      "- Keep the second item.",
+    ].join("\n");
+    const correctedMarkdown = existingMarkdown.replace("teh", "the");
+    state.proofreadResponse = correctedMarkdown;
+    const preserved = await textSuggestService.proofread({
+      document: existingMarkdown,
+      instruction: "Fix spelling only; preserve all existing Markdown formatting.",
+    });
+
+    state.proofreadResponse = "This is the **short note**.";
+    const explicitlyFormatted = await textSuggestService.proofread({
+      document: plain,
+      instruction: "Fix spelling and make ‘short note’ bold.",
+    });
+
+    const explicitFenceText = ["```markdown", corrected, "```"].join("\n");
+    state.proofreadResponse = explicitFenceText;
+    const explicitlyFenced = await textSuggestService.proofread({
+      document: plain,
+      instruction: "Fix spelling and wrap the complete document in a code fence.",
+    });
+
+    const fencedCode = ["```ts", "const value = 1;", "```"].join("\n");
+    state.proofreadResponse = fencedCode;
+    const existingFence = await textSuggestService.proofread({
+      document: fencedCode,
+      instruction: "Fix spelling without changing formatting.",
+    });
+
+    const prompts = state.chatCalls.map(
+      (call: { messages: Array<{ content: string }> }) =>
+        call.messages[1]?.content ?? "",
+    );
+    await textSuggestService.unload();
+    return {
+      unwrapped,
+      boldError,
+      backtickError,
+      preserved,
+      correctedMarkdown,
+      explicitlyFormatted,
+      explicitlyFenced,
+      explicitFenceText,
+      existingFence,
+      fencedCode,
+      prompts,
+      policy: {
+        preset: instructionAllowsMarkdownChanges(
+          "Fix spelling without changing Markdown formatting.",
+        ),
+        negative: instructionAllowsMarkdownChanges(
+          "Do not convert this text to Markdown.",
+        ),
+        positive: instructionAllowsMarkdownChanges(
+          "Convert this text to Markdown with headings.",
+        ),
+        scopedPositive: instructionAllowsMarkdownChanges(
+          "Preserve the wording, but wrap variable names in backticks.",
+        ),
+        contentOnlyHeading: instructionAllowsMarkdownChanges(
+          "Make the heading shorter.",
+        ),
+        linkTextOnly: instructionAllowsMarkdownChanges(
+          "Fix the link text.",
+        ),
+      },
+    };
+  });
+
+  expect(result.unwrapped.text).toBe("This is the short note.");
+  expect(result.boldError).toContain(
+    "tried to change Markdown formatting or add backticks",
+  );
+  expect(result.backtickError).toContain(
+    "tried to change Markdown formatting or add backticks",
+  );
+  expect(result.preserved.text).toBe(result.correctedMarkdown);
+  expect(result.explicitlyFormatted.text).toBe(
+    "This is the **short note**.",
+  );
+  expect(result.explicitlyFenced.text).toBe(result.explicitFenceText);
+  expect(result.existingFence.text).toBe(result.fencedCode);
+  expect(result.policy).toEqual({
+    preset: false,
+    negative: false,
+    positive: true,
+    scopedPositive: true,
+    contentOnlyHeading: false,
+    linkTextOnly: false,
+  });
+  expect(result.prompts.some((prompt: string) => prompt.includes("LOCK:"))).toBe(
+    true,
+  );
+  expect(result.prompts.some((prompt: string) => prompt.includes("ALLOW:"))).toBe(
+    true,
+  );
+});
+
+test("unexpected Markdown never reaches the proofreading review", async ({
+  page,
+}) => {
+  await useMockWllama(page);
+  await page.goto("/");
+
+  const original = "This is teh short note.";
+  const editor = page.locator(".tiptap").first();
+  await editor.click();
+  await page.keyboard.type(original);
+
+  await page.getByRole("button", { name: "AI writing settings" }).click();
+  const dialog = page
+    .getByRole("dialog")
+    .filter({ hasText: "Local AI writing" });
+  await dialog.getByRole("button", { name: /Model setup/ }).click();
+  await dialog.locator('input[type="file"]').setInputFiles({
+    name: "format-guard.gguf",
+    mimeType: "application/octet-stream",
+    buffer: Buffer.from("fake GGUF"),
+  });
+  await dialog.getByRole("button", { name: "Proofread document" }).click();
+  const instruction = dialog.getByRole("textbox", {
+    name: "What should the proofreader do?",
+  });
+  await instruction.fill("Fix spelling without changing Markdown formatting.");
+  await page.evaluate(() => {
+    Reflect.get(globalThis, "__wllamaTest").proofreadResponse =
+      "This is **the short note**.";
+  });
+  await dialog.getByRole("button", { name: "Review changes" }).click();
+
+  await expect(
+    dialog.getByText(
+      /tried to change Markdown formatting or add backticks.*no changes were applied/i,
+    ),
+  ).toBeVisible();
+  await expect(page.getByLabel("Proofreading changes")).toBeHidden();
+  await expect(editor).toHaveText(original);
+
+  await instruction.fill("Fix spelling and make ‘short note’ bold.");
+  await page.evaluate(() => {
+    Reflect.get(globalThis, "__wllamaTest").proofreadResponse =
+      "This is the **short note**.";
+  });
+  await dialog.getByRole("button", { name: "Review changes" }).click();
+
+  const review = page.getByLabel("Proofreading changes");
+  await expect(review).toBeVisible();
+  await review.getByRole("button", { name: "Accept changes" }).click();
+  await expect(review).toBeHidden();
+  await expect(editor.locator("strong")).toHaveText("short note");
+});
+
+test("proofreading keeps acronym expansions and Markdown wrappers atomic", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const result = await page.evaluate(async () => {
+    const modulePath = "/src/lib/textSuggest/textDiff.ts";
+    const { createTextDiffSegments, resolveTextDiff } = await import(modulePath);
+    const inspect = (before: string, after: string) => {
+      const segments = createTextDiffSegments(before, after);
+      const changes = segments.filter(
+        (segment: { type: string }) => segment.type === "change",
+      );
+      return {
+        changes,
+        accepted: resolveTextDiff(segments, new Set()),
+        rejected: resolveTextDiff(
+          segments,
+          new Set(changes.map((change: { id: string }) => change.id)),
+        ),
+      };
+    };
+
+    return {
+      acronym: inspect(
+        "Our API works.",
+        "Our Application Programming Interface (API) works.",
+      ),
+      bold: inspect("Use API client.", "Use **API client**."),
+      link: inspect(
+        "Read OpenAI docs.",
+        "Read [OpenAI docs](https://openai.com).",
+      ),
+      independent: inspect("teh cat dont", "the cat don't"),
+    };
+  });
+
+  expect(result.acronym.changes).toHaveLength(1);
+  expect(result.acronym.changes[0]).toMatchObject({
+    before: "API",
+    after: "Application Programming Interface (API)",
+  });
+  expect(result.bold.changes).toHaveLength(1);
+  expect(result.link.changes).toHaveLength(1);
+  expect(result.independent.changes).toHaveLength(2);
+  expect(result.acronym.accepted).toBe(
+    "Our Application Programming Interface (API) works.",
+  );
+  expect(result.acronym.rejected).toBe("Our API works.");
+});
+
 test("proofreading diff can be rejected unchanged and then accepted", async ({
   page,
 }) => {
@@ -423,6 +739,7 @@ test("proofreading diff can be rejected unchanged and then accepted", async ({
     const dialog = page
       .getByRole("dialog")
       .filter({ hasText: "Local AI writing" });
+    await dialog.getByRole("button", { name: "Proofread document" }).click();
     await dialog
       .getByRole("textbox", { name: "What should the proofreader do?" })
       .fill(instructionText);
@@ -430,12 +747,15 @@ test("proofreading diff can be rejected unchanged and then accepted", async ({
   };
 
   const firstDialog = await openProofreader();
+  const modelSetup = firstDialog.getByRole("button", { name: /Model setup/ });
+  await modelSetup.click();
   await firstDialog.locator('input[type="file"]').setInputFiles({
     name: "proofreader.gguf",
     mimeType: "application/octet-stream",
     buffer: Buffer.from("fake GGUF"),
   });
-  await expect(firstDialog.getByText("proofreader.gguf", { exact: true })).toBeVisible();
+  await expect(modelSetup).toContainText("Active: proofreader.gguf");
+  await expect(modelSetup).toHaveAttribute("aria-expanded", "false");
   await expect(
     firstDialog.getByRole("switch", { name: "Enable text suggestions" }),
   ).not.toBeChecked();
@@ -499,4 +819,77 @@ test("proofreading diff can be rejected unchanged and then accepted", async ({
     expect(prompt).toMatch(/REVISION_INSTRUCTION_FORMSTR_BOUNDARY_/);
     expect(prompt).toMatch(/END_DOCUMENT_FORMSTR_BOUNDARY_/);
   }
+});
+
+test("keeps an acronym original and accepts the remaining proofreading changes", async ({
+  page,
+}) => {
+  await useMockWllama(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+
+  const original = "Our API handles teh request.";
+  const modelRevision =
+    "Our Application Programming Interface (API) handles the request.";
+  const expected = "Our API handles the request.";
+  const editor = page.locator(".tiptap").first();
+  await editor.click();
+  await page.keyboard.type(original);
+
+  await page.getByRole("button", { name: "AI writing settings" }).click();
+  const dialog = page
+    .getByRole("dialog")
+    .filter({ hasText: "Local AI writing" });
+  await dialog.getByRole("button", { name: /Model setup/ }).click();
+  await dialog.locator('input[type="file"]').setInputFiles({
+    name: "selective-proofreader.gguf",
+    mimeType: "application/octet-stream",
+    buffer: Buffer.from("fake GGUF"),
+  });
+  await dialog.getByRole("button", { name: "Proofread document" }).click();
+  await dialog
+    .getByRole("textbox", { name: "What should the proofreader do?" })
+    .fill("Fix spelling without changing acronyms.");
+  await page.evaluate((response) => {
+    Reflect.get(globalThis, "__wllamaTest").proofreadResponse = response;
+  }, modelRevision);
+  await dialog.getByRole("button", { name: "Review changes" }).click();
+
+  const review = page.getByLabel("Proofreading changes");
+  await expect(review).toBeVisible();
+  await expect(review.getByText("2 suggested changes")).toBeVisible();
+  expect(
+    await review.evaluate((element) => element.scrollWidth <= element.clientWidth),
+  ).toBe(true);
+
+  await review
+    .getByRole("button", {
+      name: /Keep original for change 1 of 2: replace “API” with “Application Programming Interface \(API\)”/,
+    })
+    .click();
+
+  await expect(
+    review.getByRole("button", {
+      name: /Restore suggestion for change 1 of 2: replace “API” with “Application Programming Interface \(API\)”/,
+    }),
+  ).toBeFocused();
+  await expect(review.getByRole("status")).toHaveText(
+    "Change 1 kept as original. 1 change will be applied.",
+  );
+  await expect(
+    review.getByRole("button", {
+      name: /Keep original for change 2 of 2: replace “teh” with “the”/,
+    }),
+  ).toBeVisible();
+
+  await review
+    .getByRole("button", { name: "Accept remaining changes (1)" })
+    .click();
+  await expect(review).toBeHidden();
+  await expect(editor).toHaveText(expected);
+
+  // Selective acceptance remains one undoable document change.
+  await editor.click();
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(editor).toHaveText(original);
 });

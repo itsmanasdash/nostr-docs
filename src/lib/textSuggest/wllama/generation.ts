@@ -10,6 +10,7 @@ import {
   MAX_PROOFREAD_INSTRUCTION_CHARS,
 } from "../types";
 import { buildProofreadMessages, buildSuggestionMessages } from "./prompts";
+import { normalizeAndValidateProofreadFormatting } from "./markdownPreservation";
 import {
   normalizeContinuation,
   normalizeProofreadDocument,
@@ -158,10 +159,15 @@ export async function generateProofread(
   }
   const rawText = result.choices[0]?.message.content ?? "";
   const normalized = normalizeProofreadDocument(rawText);
-  if (!normalized.trim() && req.document.trim()) {
+  const restored = protectedInput.restore(normalized);
+  const text = normalizeAndValidateProofreadFormatting(
+    req.document,
+    restored,
+    instruction,
+  );
+  if (!text.trim() && req.document.trim()) {
     throw new Error("The model returned an empty document. No changes were applied.");
   }
-  const text = protectedInput.restore(normalized);
   console.debug("[textSuggest] proofread", {
     inputChars: req.document.length,
     outputChars: text.length,
