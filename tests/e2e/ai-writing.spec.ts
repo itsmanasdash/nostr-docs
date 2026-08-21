@@ -246,7 +246,7 @@ test("AI writing settings open other-model searches on Hugging Face", async ({
     .getByRole("textbox", { name: "Search other GGUF models" })
     .fill("tiny llama");
   await dialog
-    .getByRole("button", { name: "Search Hugging Face", exact: true })
+    .getByRole("button", { name: "Search", exact: true })
     .click();
 
   const opened = await page.evaluate(() =>

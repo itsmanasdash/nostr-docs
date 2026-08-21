@@ -73,7 +73,7 @@ export function HuggingFaceGGUFSearch() {
             lineHeight: 1.15,
           }}
         >
-          Search Hugging Face
+          Search
         </Button>
       </Box>
     </Box>
