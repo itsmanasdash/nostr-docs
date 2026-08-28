@@ -227,7 +227,9 @@ test("AI writing settings open other-model searches on Hugging Face", async ({
     .getByRole("dialog")
     .filter({ hasText: "Local AI writing" });
   await dialog.getByRole("button", { name: /Model setup/ }).click();
-  await dialog.getByRole("button", { name: /Get a model/ }).click();
+  const getModel = dialog.getByRole("button", { name: /Get a model/ });
+  await getModel.click();
+  await expect(getModel).toHaveAttribute("aria-expanded", "true");
   await page.evaluate(() => {
     window.open = ((
       url?: string | URL,
@@ -242,9 +244,11 @@ test("AI writing settings open other-model searches on Hugging Face", async ({
       return null;
     }) as typeof window.open;
   });
-  await dialog
-    .getByRole("textbox", { name: "Search other GGUF models" })
-    .fill("tiny llama");
+  const searchBox = dialog.getByRole("textbox", {
+    name: "Search other GGUF models",
+  });
+  await expect(searchBox).toBeVisible();
+  await searchBox.fill("tiny llama");
   await dialog
     .getByRole("button", { name: "Search", exact: true })
     .click();
