@@ -123,6 +123,7 @@ export function useSuggestionRequest({ prefsRef, setState }: Options) {
               ? { kind: "thinking" }
               : state,
           );
+              setSuggestion({ text: "", pos: requestPos, loading: true });
           const result = await textSuggestService.suggest(
             { prefix },
             {

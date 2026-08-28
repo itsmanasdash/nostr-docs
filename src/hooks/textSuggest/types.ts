@@ -9,6 +9,7 @@ import type { ProofreadStatus } from "./useProofreadRequest";
 export interface TextSuggestion {
   text: string;
   pos: number;
+  loading?: boolean;
 }
 
 export interface UseTextSuggestReturn {

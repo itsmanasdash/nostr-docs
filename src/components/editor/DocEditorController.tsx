@@ -48,6 +48,7 @@ import { TableHandles } from "./extensions/TableHandles";
 import {
   GhostTextSuggestion,
   setGhostSuggestion,
+  setGhostLoading,
   clearGhostSuggestion,
   ghostSuggestionPluginKey,
 } from "./extensions/GhostTextSuggestion";
@@ -669,7 +670,11 @@ export function DocumentEditorController({
       const { text, pos } = activeTextSuggestion;
       const { selection } = editor.state;
       if (selection.empty && selection.from === pos) {
-        setGhostSuggestion(editor.view, text, pos);
+        if (activeTextSuggestion.loading) {
+          setGhostLoading(editor.view, pos);
+        } else {
+          setGhostSuggestion(editor.view, text, pos);
+        }
       } else {
         // Cursor moved while the model was thinking — ignore.
         clearTextSuggestion();

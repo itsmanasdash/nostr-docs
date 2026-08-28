@@ -140,17 +140,17 @@ export default function TextSuggestSettingsDialog({
                 onSelect={(id) => void settings.selectModel(id)}
                 onRemove={(id) => void settings.removeModel(id)}
               />
+              <SuggestionBehaviorSettings
+                prefs={prefs}
+                onPreview={settings.previewPrefs}
+                onCommit={(patch) => void settings.patchPrefs(patch)}
+              />
               <Divider sx={{ mb: 2 }} />
               <AddGGUFModelSection
                 loading={settings.loading}
                 progress={settings.loadingProgress}
                 onFile={settings.addModelFromFile}
                 onCancel={settings.cancelLoading}
-              />
-              <SuggestionBehaviorSettings
-                prefs={prefs}
-                onPreview={settings.previewPrefs}
-                onCommit={(patch) => void settings.patchPrefs(patch)}
               />
             </Box>
           </AccordionDetails>
