@@ -18,9 +18,15 @@ interface Props {
   loading: boolean;
   progress: LoadProgress | null;
   onFile: (file: File) => Promise<void>;
+  onCancel: () => void;
 }
 
-export function AddGGUFModelSection({ loading, progress, onFile }: Props) {
+export function AddGGUFModelSection({
+  loading,
+  progress,
+  onFile,
+  onCancel,
+}: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [catalogExpanded, setCatalogExpanded] = useState(false);
   const handleFile = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -51,6 +57,10 @@ export function AddGGUFModelSection({ loading, progress, onFile }: Props) {
         Choose a downloaded <strong>.gguf</strong> file. It runs locally and is
         not uploaded.
       </Typography>
+      <Alert severity="warning" sx={{ mb: 1.5 }}>
+        Models larger than 2 GB may exhaust memory or freeze lower-end
+        devices. Start with a recommended model below when possible.
+      </Alert>
       <Box sx={{ display: "flex", justifyContent: "center" }}>
         <input
           ref={inputRef}
@@ -81,6 +91,9 @@ export function AddGGUFModelSection({ loading, progress, onFile }: Props) {
             variant={percent === undefined ? "indeterminate" : "determinate"}
             value={percent}
           />
+          <Button size="small" sx={{ mt: 1 }} onClick={onCancel}>
+            Cancel loading
+          </Button>
         </Box>
       )}
       <Accordion

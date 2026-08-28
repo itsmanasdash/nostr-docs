@@ -66,7 +66,7 @@ export function AIWritingFeatureSettings({
     <>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         A local AI model can suggest the next few words while you type. Press
-        <strong> Tab</strong> or tap the ghost text to accept, <strong>Esc</strong>
+        <strong> Tab</strong> or tap the ghost text to accept, <strong>Esc</strong>{" "}
         to dismiss. You can also give the proofreader any revision instruction
         below.
       </Typography>
@@ -101,6 +101,7 @@ export function AIWritingFeatureSettings({
             aria-hidden="true"
             className="proofread-border-orbit"
             data-testid="proofread-border-orbit"
+            sx={{ color: (theme) => theme.palette.secondary.main }}
           />
         )}
         <ButtonBase

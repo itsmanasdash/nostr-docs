@@ -49,6 +49,7 @@
   position: absolute;
   inset: -1px;
   z-index: 2;
+  color: currentColor;
   border-radius: inherit;
   padding: 2px;
   pointer-events: none;
@@ -56,9 +57,9 @@
     from var(--proofread-border-angle),
     transparent 0deg,
     transparent 292deg,
-    rgba(255, 255, 255, 0.18) 316deg,
-    rgba(255, 255, 255, 1) 340deg,
-    rgba(255, 255, 255, 0.5) 350deg,
+    color-mix(in srgb, currentColor 18%, transparent) 316deg,
+    currentColor 340deg,
+    color-mix(in srgb, currentColor 50%, transparent) 350deg,
     transparent 360deg
   );
   -webkit-mask:
@@ -85,7 +86,7 @@
 @media (prefers-reduced-motion: reduce) {
   .proofread-border-orbit {
     --proofread-border-angle: 340deg;
-    background: rgba(255, 255, 255, 0.9);
+    background: currentColor;
     animation: none;
   }
 }
